@@ -39,36 +39,50 @@ export function LogoRig({ play = 'static', interactive = true, showTagline = tru
   const bloomIn = useTransform(bloomR, (v) => v - 14)
   const bloom = useMotionTemplate`radial-gradient(circle at ${LEAF_PT.x}% ${LEAF_PT.y}%, #000 ${bloomIn}%, transparent ${bloomR}%)`
   const finished = useRef(false)
+  const pulledBack = useRef(false)
+  // the close-up lives in motion values, not in the style prop — a re-render can't put it back
+  const camScale = useMotionValue(intro ? CLOSE_UP : 1)
+  const camX = useMotionValue(intro ? `${50 - LEAF_PT.x}%` : '0%')
+  const camY = useMotionValue(intro ? `${50 - LEAF_PT.y}%` : '0%')
 
   useEffect(() => {
     if (!intro) return
     let cancelled = false
-    const run = async () => {
-      // seed falls into frame, lands with a squash and a ripple
-      await animate('.seed', { y: ['-30vh', '0vh'], opacity: [1, 1] }, { duration: 0.6, ease: [0.55, 0, 1, 0.45] })
+    // every step on a clock: an animation that never finishes (Safari) can't hold the intro hostage
+    const timers: number[] = []
+    const at = (ms: number, f: () => void) => timers.push(window.setTimeout(() => !cancelled && f(), ms))
+    // seed falls into frame, lands with a squash and a ripple
+    animate('.seed', { y: ['-30vh', '0vh'], opacity: [1, 1] }, { duration: 0.6, ease: [0.55, 0, 1, 0.45] })
+    at(600, () => {
       animate('.seed', { scaleX: [1, 1.9, 0], scaleY: [1, 0.35, 0] }, { duration: 0.35 })
       animate('.ripple', { scale: [0, 4], opacity: [0.7, 0] }, { duration: 0.9, delay: (i: number) => i * 0.14, ease: [0.2, 0.8, 0.3, 1] })
-      if (cancelled) return
       setSprout('grow')
-    }
-    run()
+    })
+    // the sprout normally reports in at ~1.8 s; if it doesn't, pull back anyway
+    at(2600, () => void onGrown())
     return () => {
       cancelled = true
+      timers.forEach(window.clearTimeout)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intro, animate])
 
   /** the intro's end state, applied directly — used if any browser stalls mid-sequence */
   const snapToEnd = () => {
     bloomR.set(170)
-    // through motion first (so it doesn't re-apply the close-up on the next render), then by hand
-    try {
-      animate('.cam', { scale: 1, x: '0%', y: '0%' }, { duration: 0 })
-    } catch {
-      /* fall through to the direct style below */
-    }
+    camScale.set(1)
+    camX.set('0%')
+    camY.set('0%')
+    setSprout('idle')
+    // and straight on the DOM too, in case the animation loop itself is what stalled
     const root = scope.current as HTMLElement | null
     const cam = root?.querySelector<HTMLElement>('.cam')
-    if (cam && getComputedStyle(cam).transform !== 'none' && cam.getBoundingClientRect().width > (root?.getBoundingClientRect().width ?? 0) * 1.5) cam.style.transform = 'none'
+    if (cam) cam.style.transform = 'none'
+    const mark = root?.querySelector<SVGElement>('.mark')
+    if (mark) {
+      mark.style.maskImage = 'none'
+      mark.style.webkitMaskImage = 'none'
+    }
     const tag = root?.querySelector<HTMLElement>('.tagline')
     if (tag) {
       tag.style.opacity = '1'
@@ -88,29 +102,42 @@ export function LogoRig({ play = 'static', interactive = true, showTagline = tru
       if (finished.current) return
       snapToEnd()
       finish()
-    }, 9000)
+    }, 6500)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intro])
 
-  const onGrown = async () => {
+  const onGrown = () => {
     setSprout('idle')
+    if (!intro) return fireLeaves()
+    // the sprout's own callback and the fallback timer can both land here — pull back once
+    if (pulledBack.current) return
+    pulledBack.current = true
+    const ease = [0.7, 0, 0.2, 1] as const
     try {
-      if (intro) {
-        // camera pulls back from the sprout while the wordmark blooms outward from the leaf
-        animate(bloomR, 170, { duration: 1.25, ease: [0.5, 0, 0.25, 1], delay: 0.1 })
-        animate('.mark', { scale: [1.06, 1] }, { duration: 1.4, ease: [0.3, 0, 0.2, 1], delay: 0.1 })
-        await animate('.cam', { scale: [CLOSE_UP, 1], x: [`${50 - LEAF_PT.x}%`, '0%'], y: [`${50 - LEAF_PT.y}%`, '0%'] }, { duration: 1.3, ease: [0.7, 0, 0.2, 1] })
-        fireLeaves()
-        animate('.flash-ring', { scale: [0.2, 1.6], opacity: [0.5, 0] }, { duration: 0.9, ease: [0.2, 0.8, 0.3, 1] })
-        if (showTagline) {
-          await animate('.tagline', { clipPath: ['inset(0 50% 0 50%)', 'inset(0 0% 0 0%)'], opacity: [1, 1] }, { duration: 0.7, ease: [0.65, 0, 0.35, 1] })
-        }
-      } else fireLeaves()
+      // camera pulls back from the sprout while the wordmark blooms outward from the leaf
+      animate(bloomR, 170, { duration: 1.25, ease: [0.5, 0, 0.25, 1], delay: 0.1 })
+      animate('.mark', { scale: [1.06, 1] }, { duration: 1.4, ease: [0.3, 0, 0.2, 1], delay: 0.1 })
+      animate(camScale, 1, { duration: 1.3, ease })
+      animate(camX, '0%', { duration: 1.3, ease })
+      animate(camY, '0%', { duration: 1.3, ease })
     } catch {
       snapToEnd()
     }
-    finish()
+    window.setTimeout(() => {
+      fireLeaves()
+      try {
+        animate('.flash-ring', { scale: [0.2, 1.6], opacity: [0.5, 0] }, { duration: 0.9, ease: [0.2, 0.8, 0.3, 1] })
+        if (showTagline) animate('.tagline', { clipPath: ['inset(0 50% 0 50%)', 'inset(0 0% 0 0%)'], opacity: [1, 1] }, { duration: 0.7, ease: [0.65, 0, 0.35, 1] })
+      } catch {
+        /* the snap below covers it */
+      }
+    }, 1300)
+    // done on the clock; snap whatever didn't make it to its end state
+    window.setTimeout(() => {
+      snapToEnd()
+      finish()
+    }, 2100)
   }
 
   const fireLeaves = () => {
@@ -141,7 +168,7 @@ export function LogoRig({ play = 'static', interactive = true, showTagline = tru
 
       <motion.div
         className="cam absolute inset-0 will-change-transform"
-        style={{ transformOrigin: `${LEAF_PT.x}% ${LEAF_PT.y}%`, ...(intro ? { scale: CLOSE_UP, x: `${50 - LEAF_PT.x}%`, y: `${50 - LEAF_PT.y}%` } : {}) }}
+        style={{ transformOrigin: `${LEAF_PT.x}% ${LEAF_PT.y}%`, scale: camScale, x: camX, y: camY }}
       >
         {intro && (
           <>

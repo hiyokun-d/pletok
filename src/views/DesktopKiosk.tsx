@@ -367,13 +367,17 @@ export function DesktopKiosk({ onEgg, preview = false, build = false, onBuilt }:
       </motion.div>
       <WindLeaves count={urgent ? 30 : 22} opacity={0.7} />
       {preview && (
+        // QR layout: centred over the code. Menu layout: tucked above the right column, where it
+        // can't sit on the header text on a narrower window
         <motion.span
-          className="absolute left-1/2 top-[1vh] z-30 -translate-x-1/2 rounded-full bg-brown px-4 py-1 font-cond text-[clamp(0.75rem,1.6vh,0.95rem)] font-semibold uppercase italic tracking-[0.3em] text-cream"
+          key={focus}
+          className={`absolute top-[1vh] z-30 whitespace-nowrap rounded-full bg-brown px-4 py-1 font-cond text-[clamp(0.75rem,1.6vh,0.95rem)] font-semibold uppercase italic text-cream ${focus === 'qr' ? 'left-1/2 -translate-x-1/2 tracking-[0.3em]' : 'tracking-[0.18em]'}`}
+          style={focus === 'qr' ? undefined : { right: gap }}
           initial={{ y: -30, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          transition={{ ...spring.pop, delay: 0.6 }}
+          transition={{ ...spring.pop, delay: focus === 'qr' ? 0.6 : 0.3 }}
         >
-          Preview · buka {EVENT.dateLabel.split(', ')[1]}
+          {focus === 'qr' ? `Preview · buka ${EVENT.dateLabel.split(', ')[1]}` : 'Preview · buka 25 Nov'}
         </motion.span>
       )}
 
@@ -422,17 +426,18 @@ export function DesktopKiosk({ onEgg, preview = false, build = false, onBuilt }:
                 {/* lives beside the code, never on top of it — covering a finder eye breaks scanning */}
                 <FocusToggle focus={focus} onClick={() => setManual('qr')} />
               </div>
-              <div className="flex items-center justify-between gap-2 border-t border-brown/10 pt-[1vh]">
-                <span className="flex min-w-0 items-center gap-1.5 truncate font-display text-[clamp(0.75rem,1.6vh,1rem)] font-semibold text-brown/80">
+              {/* the words drop out on a narrow card (icons stay) so the row never wraps or clips */}
+              <div className="@container flex items-center justify-between gap-2 border-t border-brown/10 pt-[1vh]">
+                <span className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap font-display text-[clamp(0.75rem,1.6vh,1rem)] font-semibold text-brown/80 [&_.lbl]:hidden @min-[13rem]:[&_.lbl]:inline">
                   {preorder && (
                     <>
-                      <ShoppingBag className="size-[1.2em] shrink-0" /> Pre-order
+                      <ShoppingBag className="size-[1.2em] shrink-0" /> <span className="lbl">Pre-order</span>
                       <span className="text-brown/30">·</span>
                     </>
                   )}
                   {feedback && (
                     <>
-                      <MessageCircleHeart className="size-[1.2em] shrink-0" /> Feedback
+                      <MessageCircleHeart className="size-[1.2em] shrink-0" /> <span className="lbl">Feedback</span>
                       <span className="text-brown/30">·</span>
                     </>
                   )}
@@ -633,7 +638,7 @@ function TimerPill() {
 
 function MejaBadge({ small = false }: { small?: boolean }) {
   return small ? (
-    <span className="rounded-full bg-brown px-3 py-1 font-display text-sm font-bold text-cream">{EVENT.table}</span>
+    <span className="shrink-0 whitespace-nowrap rounded-full bg-brown px-3 py-1 font-display text-sm font-bold text-cream">{EVENT.table}</span>
   ) : (
     <div className="shrink-0 rounded-2xl bg-brown px-[1.4vh] py-[0.8vh] text-center text-cream">
       <p className="font-cond text-[clamp(0.55rem,1.1vh,0.75rem)] uppercase italic tracking-widest opacity-75">Meja</p>

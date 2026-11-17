@@ -28,6 +28,7 @@ export function Sprout({ state, className = '', style, wiggleKey, onGrown, color
 
   useEffect(() => {
     let cancelled = false
+    let grown = 0
     const run = async () => {
       if (state === 'hidden') {
         // a 0-length stroke with round caps still paints two dots — hide it outright
@@ -36,14 +37,15 @@ export function Sprout({ state, className = '', style, wiggleKey, onGrown, color
         return
       }
       if (state === 'grow') {
+        // on a clock, not on the animations' promises: Safari sometimes never resolves the leaf
+        // scale, and the whole intro used to wait on it forever
         animate('.leaf', { scale: 0 }, { duration: 0 })
-        await animate('.stem', { pathLength: [0, 1], opacity: [1, 1] }, { duration: 0.35, ease: 'easeOut' })
-        if (cancelled) return
-        await Promise.all([
-          animate('.leaf-l', { scale: [0, 1.15, 1], rotate: [-50, 8, 0] }, { duration: 0.6, ease: 'easeOut' }),
-          animate('.leaf-r', { scale: [0, 1.15, 1], rotate: [50, -8, 0] }, { duration: 0.65, delay: 0.12, ease: 'easeOut' }),
-        ])
-        if (!cancelled) onGrown?.()
+        animate('.stem', { pathLength: [0, 1], opacity: [1, 1] }, { duration: 0.35, ease: 'easeOut' })
+        grown = window.setTimeout(() => {
+          animate('.leaf-l', { scale: [0, 1.15, 1], rotate: [-50, 8, 0] }, { duration: 0.6, ease: 'easeOut' })
+          animate('.leaf-r', { scale: [0, 1.15, 1], rotate: [50, -8, 0] }, { duration: 0.65, delay: 0.12, ease: 'easeOut' })
+          grown = window.setTimeout(() => !cancelled && onGrown?.(), 800)
+        }, 350)
         return
       }
       if (state === 'idle') {
@@ -62,6 +64,7 @@ export function Sprout({ state, className = '', style, wiggleKey, onGrown, color
     run()
     return () => {
       cancelled = true
+      window.clearTimeout(grown)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state])
