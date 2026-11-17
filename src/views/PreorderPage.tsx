@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useMemo, useState } from 'react'
-import { CalendarClock, MapPin, Minus, Plus, ShoppingBag, TriangleAlert } from 'lucide-react'
-import { EVENT } from '../data/event'
+import { CalendarClock, MapPin, MessageCircle, Minus, Plus, ShoppingBag, TriangleAlert } from 'lucide-react'
+import { ADMIN_WA, EVENT } from '../data/event'
 import { ErrorPage } from './ErrorPage'
 import { DEFAULT_CUTOFF, PREORDER_ITEMS, rupiah } from '../data/preorder'
 import { BACKEND, submitPreorder } from '../lib/backend'
@@ -33,7 +33,8 @@ export function PreorderPage() {
     const t = window.setTimeout(() => setStuck(true), 12_000)
     return () => window.clearTimeout(t)
   }, [loaded])
-  const items = PREORDER_ITEMS.filter((i) => config.items[i.id]?.on).map((i) => ({ ...i, price: config.items[i.id].price }))
+  // `normal` = the booth menu price; when the pre-order price is lower we show what they save
+  const items = PREORDER_ITEMS.filter((i) => config.items[i.id]?.on).map((i) => ({ ...i, normal: i.price, price: config.items[i.id].price }))
   const [qty, setQty] = useState<Record<string, number>>({})
   const [name, setName] = useState('')
   const [wa, setWa] = useState('')
@@ -41,7 +42,7 @@ export function PreorderPage() {
   const [hp, setHp] = useState('')
   const [flight, setFlight] = useState<null | 'flying' | 'away'>(null)
   // a snapshot of what was ordered, so a later config refresh can't change the receipt
-  const [done, setDone] = useState<{ code: string; name: string; total: number; lines: Array<{ id: string; name: string; qty: number; price: number }> } | null>(null)
+  const [done, setDone] = useState<{ code: string; name: string; total: number; saved: number; lines: Array<{ id: string; name: string; qty: number; price: number }> } | null>(null)
   const [error, setError] = useState<string | null>(null)
   // one id per order attempt, so a retry never makes a second order
   const [orderId] = useState(newId)
@@ -49,6 +50,7 @@ export function PreorderPage() {
   const lines = items.filter((i) => (qty[i.id] ?? 0) > 0)
   const total = useMemo(() => lines.reduce((t, i) => t + i.price * qty[i.id], 0), [lines, qty])
   const cups = lines.reduce((n, i) => n + qty[i.id], 0)
+  const saved = lines.reduce((t, i) => t + Math.max(0, i.normal - i.price) * qty[i.id], 0)
   const waOk = wa.replace(/\D/g, '').length >= 9
   const ready = lines.length > 0 && name.trim() && waOk
 
@@ -64,7 +66,7 @@ export function PreorderPage() {
     await new Promise((res) => window.setTimeout(res, Math.max(0, MIN_FLIGHT_MS - (performance.now() - started))))
     if (r?.ok) {
       trackClick('preorder-terkirim')
-      setDone({ code: r.code, name: name.trim(), total: r.total, lines: lines.map((i) => ({ id: i.id, name: i.name, qty: qty[i.id], price: i.price })) })
+      setDone({ code: r.code, name: name.trim(), total: r.total, saved, lines: lines.map((i) => ({ id: i.id, name: i.name, qty: qty[i.id], price: i.price })) })
       setFlight('away')
     } else {
       setFlight(null)
@@ -113,6 +115,7 @@ export function PreorderPage() {
                   <span>Total</span>
                   <span className="tabular-nums">{rupiah(done.total)}</span>
                 </p>
+                {done.saved > 0 && <p className="mt-1 text-right font-display text-sm font-semibold text-leaf">Kamu hemat {rupiah(done.saved)} dari harga di booth</p>}
               </div>
               <p className="mt-5 flex items-center gap-2 font-display text-brown-soft">
                 <MapPin className="size-4" /> Ambil di {EVENT.table} · {EVENT.dateLabel}, {EVENT.timeLabel}
@@ -159,6 +162,7 @@ export function PreorderPage() {
                 <p className="flex items-center gap-1.5 font-cond text-base italic text-brown-soft">
                   <CalendarClock className="size-4" /> Pre-order ditutup {dateLong(Math.min(config.cutoff, DEFAULT_CUTOFF))} WIB
                 </p>
+                <AdminContact />
               </header>
 
               <div className="flex flex-col gap-3">
@@ -174,7 +178,15 @@ export function PreorderPage() {
                       <div className="min-w-0 flex-1">
                         <p className="font-display text-lg font-bold leading-tight">{i.name}</p>
                         <p className="truncate font-cond text-sm italic text-brown-soft">{i.detail}</p>
-                        <p className="mt-0.5 font-display font-semibold text-terracotta">{rupiah(i.price)}</p>
+                        <p className="mt-0.5 flex flex-wrap items-baseline gap-x-2 font-display font-semibold text-terracotta">
+                          {rupiah(i.price)}
+                          {i.normal > i.price && (
+                            <>
+                              <s className="text-sm font-normal text-brown/45">{rupiah(i.normal)}</s>
+                              <span className="rounded-full bg-leaf px-2 py-0.5 font-cond text-xs italic text-cream">hemat {rupiah(i.normal - i.price)}</span>
+                            </>
+                          )}
+                        </p>
                       </div>
                       <div className="flex shrink-0 items-center gap-1.5">
                         <Step label={`Kurangi ${i.name}`} onClick={() => bump(i.id, -1)} disabled={!n}>
@@ -196,6 +208,7 @@ export function PreorderPage() {
                 <input value={wa} onChange={(e) => setWa(e.target.value)} maxLength={20} placeholder="Nomor WhatsApp (08…)" inputMode="tel" autoComplete="tel" className="rounded-2xl bg-cream-deep/80 p-3.5 font-display outline-none focus:ring-2 focus:ring-terracotta" />
                 <textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} rows={2} placeholder="Catatan (opsional) — misal: es sedikit" className="resize-none rounded-2xl bg-cream-deep/80 p-3.5 font-display outline-none focus:ring-2 focus:ring-terracotta" />
                 <p className="font-cond text-sm italic text-brown/55">Nomor WhatsApp cuma dipakai tim Pletok untuk konfirmasi pesananmu.</p>
+                <AdminContact className="mt-2" />
               </section>
 
               <input tabIndex={-1} autoComplete="off" value={hp} onChange={(e) => setHp(e.target.value)} className="absolute -left-[9999px] size-px opacity-0" aria-hidden />
@@ -207,6 +220,19 @@ export function PreorderPage() {
               )}
 
               <div className="sticky bottom-0 -mx-5 bg-gradient-to-t from-cream from-60% to-transparent px-5 pb-4 pt-6">
+                <AnimatePresence>
+                  {saved > 0 && (
+                    <motion.p
+                      key="saved"
+                      className="mx-auto mb-2 w-fit rounded-full bg-leaf px-4 py-1.5 text-center font-display text-sm font-semibold text-cream shadow"
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 8 }}
+                    >
+                      Pre-order bikin kamu hemat {rupiah(saved)}!
+                    </motion.p>
+                  )}
+                </AnimatePresence>
                 <motion.button
                   type="submit"
                   disabled={!ready}
@@ -237,5 +263,24 @@ function Step({ children, onClick, disabled, solid, label }: { children: React.R
     >
       {children}
     </motion.button>
+  )
+}
+
+/** "ada pertanyaan?" — the admin's WhatsApp (ADMIN_WA in data/event.ts) */
+function AdminContact({ className = '' }: { className?: string }) {
+  return (
+    <p className={`flex items-start gap-1.5 font-cond text-base italic text-brown-soft ${className}`}>
+      <MessageCircle className="mt-1 size-4 shrink-0" />
+      <span>
+        Ada pertanyaan? WhatsApp admin:{' '}
+        {ADMIN_WA ? (
+          <a href={`https://wa.me/${ADMIN_WA}`} target="_blank" rel="noreferrer" className="font-semibold not-italic text-leaf underline">
+            +{ADMIN_WA}
+          </a>
+        ) : (
+          <span className="font-semibold">[the developer forgot to change this, pls don't blame him, he's an idiot]</span>
+        )}
+      </span>
+    </p>
   )
 }

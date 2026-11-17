@@ -12,6 +12,8 @@ export const EVENT = {
 
 export const INSTAGRAM_URL = 'https://www.instagram.com/pletok._/'
 export const INSTAGRAM_HANDLE = '@pletok._'
+/** admin WhatsApp for pre-order questions, e.g. '6281234567890' — empty shows the placeholder note */
+export const ADMIN_WA = ''
 
 /** The deployed site — the QR codes point here so scans can be counted before forwarding */
 export const SITE_URL = 'https://pletok.hiyokun.dev'
