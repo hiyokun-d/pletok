@@ -1,10 +1,10 @@
 import { motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
-import { Ban, Check, DoorClosed, Landmark, Loader2, PackageCheck, RotateCcw, ShieldCheck, ShoppingBag, UtensilsCrossed } from 'lucide-react'
+import { Ban, Check, DoorClosed, Landmark, Loader2, PackageCheck, RotateCcw, ShieldCheck, ShoppingBag, Trash2, UtensilsCrossed } from 'lucide-react'
 import { EVENT } from '../data/event'
 import { BUNDLES, DRINKS, type DrinkId } from '../data/menu'
 import { DEFAULT_CUTOFF, DEFAULT_PREORDER, PREORDER_ITEMS } from '../data/preorder'
-import { BACKEND, crewPin, savePreorderConfig, setFeedbackModeRemote, type PreorderConfig } from '../lib/backend'
+import { BACKEND, crewPin, savePreorderConfig, setFeedbackModeRemote, wipeData, type PreorderConfig, type WipeTarget } from '../lib/backend'
 import { usePreorder } from '../hooks/usePreorder'
 import { resetMenu, setBundleForced, setBundleItems, setClosedEarly, setDrinkSold, setMenuPrice, useMenu, useMenuSync } from '../hooks/useMenu'
 import { useEventPhase } from '../hooks/useEventPhase'
@@ -48,6 +48,7 @@ export function ConfigPage() {
           return true
         }}
       />
+      <DataReset wipe={(what) => (DEMO ? wait(1500).then(() => Object.fromEntries(what.map((w) => [w, 3]))) : wipeData(pin, what))} />
     </Shell>
   )
 }
@@ -507,3 +508,76 @@ function PreorderAdmin({ remote, loaded, save }: { remote: PreorderConfig; loade
   )
 }
 
+
+/* ------------------------------------------------------------------ clean up test data */
+
+const WIPE: Array<{ id: WipeTarget; label: string; hint: string }> = [
+  { id: 'orders', label: 'Pre-order', hint: 'semua pesanan + kode ambil mulai lagi dari 001' },
+  { id: 'feedback', label: 'Feedback', hint: 'semua jawaban form' },
+  { id: 'scans', label: 'Scan & klik', hint: 'hitungan scan QR / link' },
+  { id: 'proofs', label: 'Bukti transfer', hint: 'screenshot di Drive → Sampah (30 hari bisa dipulihkan)' },
+]
+const CONFIRM = 'HAPUS'
+
+/** before launch: wipe the test rows. Menu, prices and pre-order settings are never touched. */
+function DataReset({ wipe }: { wipe: (what: WipeTarget[]) => Promise<Partial<Record<WipeTarget, number>> | null> }) {
+  const [pick, setPick] = useState<WipeTarget[]>(['orders', 'feedback', 'scans', 'proofs'])
+  const [typed, setTyped] = useState('')
+  const [state, setState] = useState<'idle' | 'busy' | 'error'>('idle')
+  const [done, setDone] = useState<Partial<Record<WipeTarget, number>>>()
+  const armed = typed.trim().toUpperCase() === CONFIRM && pick.length > 0 && state !== 'busy'
+  const run = async () => {
+    if (!armed) return
+    setState('busy')
+    setDone(undefined)
+    const r = await wipe(pick)
+    if (!r) return setState('error')
+    setDone(r)
+    setTyped('')
+    setState('idle')
+  }
+  return (
+    <Card title={<span className="flex items-center gap-2"><Trash2 className="size-5 text-terracotta" /> Bersihkan data</span>} meta="sebelum hari H — hapus data tes">
+      <p className="font-display text-sm text-brown-soft">
+        Kosongkan isi tab yang dipilih. Tiap tab disalin dulu ke tab <em>Backup …</em> di Sheet, jadi kalau salah hapus masih bisa diambil lagi. Menu, harga & setelan pre-order <b>nggak</b> ikut terhapus.
+      </p>
+      <div className="mt-3 flex flex-col gap-2">
+        {WIPE.map((w) => {
+          const on = pick.includes(w.id)
+          return (
+            <button
+              key={w.id}
+              type="button"
+              onClick={() => setPick((p) => (on ? p.filter((x) => x !== w.id) : [...p, w.id]))}
+              className={`flex items-center gap-3 rounded-2xl border-2 p-3 text-left transition-colors ${on ? 'border-terracotta/50 bg-terracotta/5' : 'border-brown/10'}`}
+            >
+              <span className={`grid size-5 shrink-0 place-items-center rounded-md border-2 ${on ? 'border-terracotta bg-terracotta text-cream' : 'border-brown/30'}`}>{on && <Check className="size-3.5" />}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-display font-semibold">{w.label}</span>
+                <span className="font-cond text-sm italic text-brown/60">{w.hint}</span>
+              </span>
+              {done?.[w.id] !== undefined && <span className="shrink-0 font-cond text-sm italic text-leaf">{done[w.id]} dihapus</span>}
+            </button>
+          )
+        })}
+      </div>
+      <label className="mt-4 block font-display text-sm text-brown-soft">
+        Ketik <b className="tracking-widest text-terracotta">{CONFIRM}</b> untuk lanjut
+        <input value={typed} onChange={(e) => setTyped(e.target.value)} autoCapitalize="characters" autoComplete="off" spellCheck={false} className="mt-1.5 w-full rounded-2xl bg-cream-deep/80 p-3 font-display tracking-widest outline-none focus:ring-2 focus:ring-terracotta" />
+      </label>
+      <motion.button
+        type="button"
+        onClick={() => void run()}
+        disabled={!armed}
+        whileTap={{ scale: 0.97 }}
+        transition={spring.snappy}
+        className="mt-3 flex w-full items-center justify-center gap-2 rounded-full bg-terracotta py-3 font-display font-semibold text-cream disabled:opacity-35"
+      >
+        {state === 'busy' ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+        {state === 'busy' ? 'Menghapus…' : `Hapus yang dipilih (${pick.length})`}
+      </motion.button>
+      {state === 'error' && <p className="mt-2 font-cond text-sm italic text-terracotta">Gagal — sinyal, atau Code.gs belum di-deploy versi baru. Nggak ada yang terhapus kalau ini muncul sebelum Sheet menjawab.</p>}
+      {done && <p className="mt-2 font-cond text-sm italic text-leaf">Beres! Backup-nya ada di tab "Backup …" di Google Sheet — hapus tab itu kalau sudah yakin.</p>}
+    </Card>
+  )
+}

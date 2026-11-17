@@ -81,9 +81,11 @@ export function useMyOrders() {
     if (!r) return
     setCheckedAt(Date.now())
     setOrders((os) => {
-      const next = os.map((o) => {
+      // asked about but no longer in the Sheet (test data cleared from /config) → forget it here too
+      const next = os.flatMap((o) => {
         const u = r.find((x) => x.id === o.id)
-        return u ? { ...o, status: u.status, code: u.code || o.code, ref: u.ref || o.ref, proof: u.proof || o.proof } : o
+        if (!u) return ids.includes(o.id) ? [] : [o]
+        return [{ ...o, status: u.status, code: u.code || o.code, ref: u.ref || o.ref, proof: u.proof || o.proof }]
       })
       store(next)
       return next

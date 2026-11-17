@@ -10,6 +10,7 @@
  *   POST {type:'preorder-status', pin, id, status?, sent?} → verify (hands out e.g. elisha-007), picked up, rejected
  *   POST {type:'preorder-proof', id, image} → the transfer screenshot into Drive, named after the customer
  *   POST {type:'preorder-proof-get', pin, id} → that screenshot, for /hasil
+ *   POST {type:'wipe', pin, what:['orders','feedback','scans','proofs']} → clear test data (backs up first)
  *   GET  ?stats=1                → numbers for the closing screen + current menu state
  *
  * Exports: the data is just a Sheet — File → Download (.xlsx / .csv / .pdf), or
@@ -300,6 +301,37 @@ function doPost(e) {
       if (!id) return json_({ ok: false, error: 'none' })
       const blob = DriveApp.getFileById(id).getBlob()
       return json_({ ok: true, image: 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes()), name: blob.getName(), url: r[14] })
+    }
+
+    // /config "Bersihkan data": empties the chosen tabs after copying each to a backup tab,
+    // and moves the transfer screenshots to Drive's trash (recoverable for 30 days)
+    if (b.type === 'wipe') {
+      if (!b.pin || b.pin !== props.getProperty('CREW_PIN')) return json_({ ok: false, error: 'pin' })
+      const what = Array.isArray(b.what) ? b.what : []
+      const ss = SpreadsheetApp.getActiveSpreadsheet()
+      const stamp = Utilities.formatDate(now, 'Asia/Jakarta', 'dd MMM HH.mm')
+      const tabs = { orders: () => orderSheet_(), feedback: () => sheet_('Feedback', FEEDBACK_COLS), scans: () => sheet_('Scans', SCAN_COLS) }
+      const done = {}
+      Object.keys(tabs).forEach((k) => {
+        if (what.indexOf(k) === -1) return
+        const sh = tabs[k]()
+        const n = Math.max(0, sh.getLastRow() - 1)
+        if (n) {
+          sh.copyTo(ss).setName('Backup ' + sh.getName() + ' ' + stamp)
+          sh.deleteRows(2, n)
+        }
+        done[k] = n
+      })
+      if (what.indexOf('proofs') !== -1) {
+        let n = 0
+        const files = proofFolder_().getFiles()
+        while (files.hasNext()) {
+          files.next().setTrashed(true)
+          n++
+        }
+        done.proofs = n
+      }
+      return json_({ ok: true, done })
     }
 
     if (b.type === 'pin') return json_({ ok: b.pin === props.getProperty('CREW_PIN') })

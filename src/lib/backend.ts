@@ -251,6 +251,13 @@ export async function savePreorderConfig(pin: string, config: PreorderConfig): P
   return !!r?.ok
 }
 
+export type WipeTarget = 'orders' | 'feedback' | 'scans' | 'proofs'
+/** admin: clear test data — the Sheet backs each tab up first; returns how many were removed */
+export async function wipeData(pin: string, what: WipeTarget[]) {
+  const r = await postJson<{ done: Partial<Record<WipeTarget, number>> }>({ type: 'wipe', pin, what }, 1)
+  return r?.ok ? r.done : null
+}
+
 /** admin: move an order along (verifying hands out its code) and/or mark the code as sent */
 export async function updateOrder(pin: string, id: string, patch: { status?: OrderStatus; sent?: boolean }): Promise<boolean> {
   const r = await postJson({ type: 'preorder-status', pin, id, ...patch })
