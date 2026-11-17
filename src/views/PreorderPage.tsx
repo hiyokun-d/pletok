@@ -1,7 +1,8 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { CalendarClock, MapPin, Minus, Plus, ShoppingBag, TriangleAlert } from 'lucide-react'
 import { EVENT } from '../data/event'
+import { ErrorPage } from './ErrorPage'
 import { DEFAULT_CUTOFF, PREORDER_ITEMS, rupiah } from '../data/preorder'
 import { BACKEND, submitPreorder } from '../lib/backend'
 import { trackClick } from '../lib/analytics'
@@ -25,6 +26,13 @@ const dateLong = (ms: number) =>
  */
 export function PreorderPage() {
   const { config, loaded, open } = usePreorder()
+  // no answer from the Sheet after a while → say so instead of an endless sprout
+  const [stuck, setStuck] = useState(false)
+  useEffect(() => {
+    if (loaded) return setStuck(false)
+    const t = window.setTimeout(() => setStuck(true), 12_000)
+    return () => window.clearTimeout(t)
+  }, [loaded])
   const items = PREORDER_ITEMS.filter((i) => config.items[i.id]?.on).map((i) => ({ ...i, price: config.items[i.id].price }))
   const [qty, setQty] = useState<Record<string, number>>({})
   const [name, setName] = useState('')
@@ -110,6 +118,10 @@ export function PreorderPage() {
                 <MapPin className="size-4" /> Ambil di {EVENT.table} · {EVENT.dateLabel}, {EVENT.timeLabel}
               </p>
               <p className="mt-2 font-cond text-sm italic text-brown/55">Screenshot halaman ini ya — sebutkan kode & nama saat ambil. Tim kami akan menghubungi lewat WhatsApp.</p>
+            </motion.section>
+          ) : BACKEND && !loaded && stuck ? (
+            <motion.section key="down" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+              <ErrorPage kind={navigator.onLine ? 503 : 'offline'} />
             </motion.section>
           ) : BACKEND && !loaded ? (
             <motion.section key="loading" className="grid min-h-[70dvh] place-items-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>

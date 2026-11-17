@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'motion/react'
 import type { MotionStyle } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
-import { Leaf, MapPin, MessageCircleHeart, QrCode, ScanLine, Sparkles, UtensilsCrossed } from 'lucide-react'
+import { Leaf, MapPin, MessageCircleHeart, QrCode, ScanLine, ShoppingBag, Sparkles, UtensilsCrossed } from 'lucide-react'
 import { BUNDLES, DRINKS, drinkById, TAGLINE } from '../data/menu'
 import { STORY } from '../data/story'
 import { EVENT, QR_LINKS } from '../data/event'
@@ -12,6 +12,7 @@ import { WindLeaves } from '../components/WindLeaves'
 import { SoldStamp } from '../components/SoldStamp'
 import { useMenu, type LiveBundle } from '../hooks/useMenu'
 import { useFeedbackOpen } from '../hooks/useFeedbackOpen'
+import { usePreorder } from '../hooks/usePreorder'
 import { PriceTag } from '../components/PriceTag'
 import { EventStatus } from '../components/EventStatus'
 import { LogoRig } from '../components/LogoRig'
@@ -159,14 +160,17 @@ const panelIn = (dir: -1 | 1 | 0, delay = 0) => ({
 
 function ScanCta() {
   const feedback = useFeedbackOpen().open
+  const preorder = usePreorder().open
   return (
     <div className="flex shrink-0 items-center gap-[1.4vh] rounded-2xl bg-brown p-[1.5vh] text-cream">
       <motion.div className="grid size-[clamp(2rem,5vh,2.8rem)] shrink-0 place-items-center rounded-xl bg-cream/10" animate={{ scale: [1, 1.12, 1] }} transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}>
         <ScanLine className="size-[60%]" />
       </motion.div>
       <div className="min-w-0 flex-1 leading-tight">
-        <p className="whitespace-nowrap font-display text-[clamp(0.95rem,2.2vh,1.25rem)] font-semibold">Scan QR-nya!</p>
-        <p className="truncate font-cond text-[clamp(0.75rem,1.6vh,0.95rem)] italic opacity-80">{feedback ? 'Feedback & Instagram kami' : 'Follow Instagram kami'}</p>
+        <p className="whitespace-nowrap font-display text-[clamp(0.95rem,2.2vh,1.25rem)] font-semibold">{preorder ? 'Scan buat pre-order!' : 'Scan QR-nya!'}</p>
+        <p className="truncate font-cond text-[clamp(0.75rem,1.6vh,0.95rem)] italic opacity-80">
+          {preorder ? 'Pesan sekarang, ambil di booth · IG kami' : feedback ? 'Feedback & Instagram kami' : 'Follow Instagram kami'}
+        </p>
       </div>
     </div>
   )
@@ -306,6 +310,7 @@ export function DesktopKiosk({ onEgg, preview = false, build = false, onBuilt }:
   const [hoverBundle, setHoverBundle] = useState<number | null>(null)
   const menu = useMenu()
   const feedback = useFeedbackOpen().open
+  const preorder = usePreorder().open
   const lastPointer = useRef(Date.now())
 
   // phase change or 45s without anyone touching → back to the schedule's layout
@@ -419,6 +424,12 @@ export function DesktopKiosk({ onEgg, preview = false, build = false, onBuilt }:
               </div>
               <div className="flex items-center justify-between gap-2 border-t border-brown/10 pt-[1vh]">
                 <span className="flex min-w-0 items-center gap-1.5 truncate font-display text-[clamp(0.75rem,1.6vh,1rem)] font-semibold text-brown/80">
+                  {preorder && (
+                    <>
+                      <ShoppingBag className="size-[1.2em] shrink-0" /> Pre-order
+                      <span className="text-brown/30">·</span>
+                    </>
+                  )}
                   {feedback && (
                     <>
                       <MessageCircleHeart className="size-[1.2em] shrink-0" /> Feedback
@@ -528,7 +539,27 @@ export function DesktopKiosk({ onEgg, preview = false, build = false, onBuilt }:
 
       {/* layout switch — so visitors can browse right here, not only on their phones */}
       {focus === 'qr' && (
-        <FocusToggle focus={focus} onClick={() => setManual('menu')} className="absolute z-30" style={{ left: '50%', x: '-50%', top: qrBigTop + qrBig + H * 0.025 }} />
+        <motion.div className="absolute z-30 flex items-center gap-3" style={{ left: '50%', x: '-50%', top: qrBigTop + qrBig + H * 0.025 }}>
+          <FocusToggle focus={focus} onClick={() => setManual('menu')} />
+          {/* pre-order right on this screen — no phone needed (laptop visitors, or the crew helping someone) */}
+          <AnimatePresence>
+            {preorder && (
+              <motion.a
+                href="/preorder"
+                data-track="preorder-kiosk"
+                className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-terracotta px-5 py-3 font-display text-[clamp(0.85rem,1.9vh,1.1rem)] font-semibold text-cream shadow-[0_5px_0_#7a3c1b]"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.93 }}
+                transition={spring.glide}
+              >
+                <ShoppingBag className="size-[1.1em]" /> Pre-order di sini
+              </motion.a>
+            )}
+          </AnimatePresence>
+        </motion.div>
       )}
       </div>
       )}

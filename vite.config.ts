@@ -1,6 +1,9 @@
+/// <reference types="node" />
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 
 const SITE_URL = 'https://pletok.hiyokun.dev'
 
@@ -27,10 +30,34 @@ function seo(siteUrl: string): Plugin {
   }
 }
 
+/**
+ * Emits /sw.js (template: src/sw.js) with this build's files to save for offline use: the app,
+ * its CSS, every picture and the Latin fonts (~1.6 MB). Other font subsets get cached when used.
+ */
+function offline(): Plugin {
+  return {
+    name: 'pletok-offline',
+    apply: 'build',
+    generateBundle(_, bundle) {
+      const files = Object.keys(bundle)
+        .filter((f) => /\.(js|css|png|jpe?g|svg|webp)$/.test(f) || /latin-\d+-normal.*\.woff2$/.test(f))
+        .filter((f) => !/^(sw\.js|robots\.txt|sitemap\.xml)$/.test(f) && !/(cyrillic|vietnamese|greek|latin-ext)/.test(f))
+        .map((f) => `/${f}`)
+      const extra = ['/favicon.svg', '/icon-192.png', '/manifest.webmanifest']
+      const list = [...files, ...extra]
+      const version = createHash('sha1').update(list.join()).digest('hex').slice(0, 10)
+      const source = readFileSync(new URL('./src/sw.js', import.meta.url), 'utf8')
+        .replace('__VERSION__', version)
+        .replace('__PRECACHE__', JSON.stringify(list))
+      this.emitFile({ type: 'asset', fileName: 'sw.js', source })
+    },
+  }
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '')
   return {
-    plugins: [react(), tailwindcss(), seo(env.SITE_URL || SITE_URL)],
+    plugins: [react(), tailwindcss(), seo(env.SITE_URL || SITE_URL), offline()],
     server: { host: true },
   }
 })

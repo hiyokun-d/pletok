@@ -89,6 +89,18 @@
       <p><a href="https://www.instagram.com/pletok._/">Instagram @pletok._</a></p>
     </noscript>
     <div id="root"></div>
+    <script>
+      // safety net for bad venue wifi: if the app never started (half-loaded script), reload once
+      setTimeout(function () {
+        try {
+          var r = document.getElementById('root')
+          if (r && !r.hasChildNodes() && !sessionStorage.getItem('pletok:retried')) {
+            sessionStorage.setItem('pletok:retried', '1')
+            location.reload()
+          }
+        } catch (e) {}
+      }, 6000)
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

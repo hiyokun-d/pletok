@@ -2,24 +2,23 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     {
-      "source": "/go/:target",
+      "source": "/(.*)",
       "destination": "/index.html"
-    },
+    }
+  ],
+  "headers": [
     {
-      "source": "/link",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/feedback",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/hasil",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/preorder",
-      "destination": "/index.html"
+      "source": "/sw.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        },
+        {
+          "key": "Service-Worker-Allowed",
+          "value": "/"
+        }
+      ]
     }
   ]
 }

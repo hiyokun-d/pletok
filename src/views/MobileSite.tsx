@@ -1,6 +1,6 @@
 import { motion, useScroll, useSpring, useTransform } from 'motion/react'
 import { useRef } from 'react'
-import { CalendarDays, Clock, MapPin, Sparkles } from 'lucide-react'
+import { CalendarDays, Clock, MapPin, ShoppingBag, Sparkles } from 'lucide-react'
 import { InstagramIcon } from '../components/InstagramIcon'
 import { DRINKS, TAGLINE } from '../data/menu'
 import { useMenu } from '../hooks/useMenu'
@@ -14,6 +14,8 @@ import { CupCard } from '../components/CupCard'
 import { BundleCard } from '../components/BundleCard'
 import { EventStatus } from '../components/EventStatus'
 import { FeedbackButton } from '../components/FeedbackButton'
+import { usePreorder } from '../hooks/usePreorder'
+import { useFeedbackOpen } from '../hooks/useFeedbackOpen'
 import { Reveal, RevealItem } from '../components/Reveal'
 import { drop, ease, pop, spring } from '../lib/motion'
 
@@ -37,6 +39,8 @@ function SectionTitle({ kicker, title }: { kicker: string; title: string }) {
 
 export function MobileSite({ onEgg }: { onEgg: () => void }) {
   const menu = useMenu()
+  const preorder = usePreorder().open
+  const feedback = useFeedbackOpen().open
   const { phase } = useEventPhase()
   const heroRef = useRef<HTMLElement>(null)
   const storyRef = useRef<HTMLElement>(null)
@@ -271,6 +275,18 @@ export function MobileSite({ onEgg }: { onEgg: () => void }) {
       {/* ---------- sticky action bar ---------- */}
       <motion.div style={{ y: barY }} className="fixed inset-x-0 bottom-0 z-30 flex items-center justify-center gap-3 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
         <div className="absolute inset-0 bg-gradient-to-t from-cream via-cream/80 to-transparent" />
+        {/* one big button: feedback once the form opens, pre-order until then */}
+        {preorder && !feedback && (
+          <motion.a
+            href="/preorder"
+            whileTap={{ scale: 0.94 }}
+            initial={{ y: 30, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="relative inline-flex items-center gap-2 rounded-full bg-brown px-6 py-3.5 font-display font-semibold text-cream shadow-[0_5px_0_#3a1c0f]"
+          >
+            <ShoppingBag className="size-5" /> Pre-order sekarang
+          </motion.a>
+        )}
         <FeedbackButton className="relative" />
         <motion.a
           href={INSTAGRAM_URL}
