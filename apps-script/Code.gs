@@ -40,8 +40,7 @@ function orderSheet_() {
   return sh
 }
 const orderRows_ = (sh) => (sh.getLastRow() < 2 ? [] : sh.getRange(2, 1, sh.getLastRow() - 1, ORDER_COLS.length).getValues())
-// the private "kode cek" a customer types on any phone to find their order — random, unlike the
-// pickup code (PLT-001, PLT-002… is easy to guess, so it never unlocks anything by itself)
+// the private "kode cek" a customer types on any phone (or opens as /c/KODE) to find their order
 const REF_ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
 function newRef_(rows) {
   const used = rows.map((r) => String(r[13]))

@@ -5,13 +5,14 @@ import {
   MapPin,
   Minus,
   Plus,
+  Loader2,
   ShoppingBag,
   TriangleAlert,
 } from "lucide-react";
 import { EVENT } from "../data/event";
 import { ErrorPage } from "./ErrorPage";
 import { DEFAULT_CUTOFF, PREORDER_ITEMS, rupiah } from "../data/preorder";
-import { BACKEND, submitPreorder } from "../lib/backend";
+import { BACKEND, findOrders, submitPreorder } from "../lib/backend";
 import { trackClick } from "../lib/analytics";
 import { usePreorder } from "../hooks/usePreorder";
 import { BackButton } from "../components/BackButton";
@@ -21,6 +22,9 @@ import { useMenu } from "../hooks/useMenu";
 import {
   AdminContact,
   FindOrder,
+  NoRefund,
+  WaInput,
+  waValid,
   MyOrdersList,
   OrderTracker,
   useMyOrders,
@@ -77,6 +81,27 @@ export function PreorderPage() {
   const [trackId, setTrackId] = useState<string | null>(null);
   const tracked = mine.orders.find((o) => o.id === trackId);
   const [error, setError] = useState<string | null>(null);
+  // opened from the WhatsApp link (?cek=KODE): fetch that order and go straight to its status
+  const [opening, setOpening] = useState(() => new URLSearchParams(location.search).get("cek"));
+  const [linkMiss, setLinkMiss] = useState<string>();
+  const { merge } = mine;
+  useEffect(() => {
+    if (!opening) return;
+    let live = true;
+    void findOrders({ ref: opening }).then((r) => {
+      if (!live) return;
+      if (r?.length) {
+        merge(r);
+        setTrackId(r[r.length - 1].id);
+      } else {
+        setLinkMiss(r ? "Link pesanan itu nggak ketemu — coba pakai nomor WA + nama di sini." : "Sinyalnya lagi susah — buka lagi link-nya sebentar lagi, atau cek di sini.");
+      }
+      setOpening(null);
+    });
+    return () => {
+      live = false;
+    };
+  }, [opening, merge]);
   // one id per order attempt, so a retry never makes a second order
   const [orderId, setOrderId] = useState(newId);
 
@@ -90,7 +115,8 @@ export function PreorderPage() {
     (t, i) => t + Math.max(0, i.normal - i.price) * qty[i.id],
     0,
   );
-  const waOk = wa.replace(/\D/g, "").length >= 9;
+  // stored as the part after +62; sent as 08…
+  const waOk = waValid(wa);
   const ready = lines.length > 0 && name.trim() && waOk;
 
   const bump = (id: string, d: number) =>
@@ -109,7 +135,7 @@ export function PreorderPage() {
       id: orderId,
       items: lines.map((i) => ({ id: i.id, qty: qty[i.id] })),
       name: name.trim(),
-      wa,
+      wa: "0" + wa,
       note: note.trim(),
       hp,
     });
@@ -181,6 +207,17 @@ export function PreorderPage() {
                 Mengirim pesananmu…
               </motion.p>
             </motion.section>
+          ) : opening && !tracked ? (
+            <motion.section
+              key="opening"
+              className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-center"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <Loader2 className="size-8 animate-spin text-terracotta" />
+              <p className="font-display text-lg text-brown-soft">Membuka pesananmu…</p>
+            </motion.section>
           ) : tracked ? (
             <motion.section
               key={`track-${tracked.id}`}
@@ -232,7 +269,7 @@ export function PreorderPage() {
               {/* closed for new orders, but earlier ones (and their codes) stay reachable */}
               <div className="mt-8 flex w-full max-w-md flex-col gap-4 text-left">
                 <MyOrdersList orders={mine.orders} onOpen={setTrackId} />
-                <FindOrder onFound={mine.merge} onOpen={setTrackId} />
+                <FindOrder onFound={mine.merge} onOpen={setTrackId} notice={linkMiss} />
               </div>
             </motion.section>
           ) : (
@@ -267,7 +304,7 @@ export function PreorderPage() {
               </header>
 
               <MyOrdersList orders={mine.orders} onOpen={setTrackId} />
-              <FindOrder onFound={mine.merge} onOpen={setTrackId} />
+              <FindOrder onFound={mine.merge} onOpen={setTrackId} notice={linkMiss} />
 
               <div className="flex flex-col gap-3">
                 {items.map((i) => {
@@ -347,15 +384,7 @@ export function PreorderPage() {
                   autoComplete="name"
                   className="rounded-2xl bg-cream-deep/80 p-3.5 font-display outline-none focus:ring-2 focus:ring-terracotta"
                 />
-                <input
-                  value={wa}
-                  onChange={(e) => setWa(e.target.value)}
-                  maxLength={20}
-                  placeholder="Nomor WhatsApp (08…)"
-                  inputMode="tel"
-                  autoComplete="tel"
-                  className="rounded-2xl bg-cream-deep/80 p-3.5 font-display outline-none focus:ring-2 focus:ring-terracotta"
-                />
+                <WaInput value={wa} onChange={setWa} />
                 <textarea
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
@@ -368,6 +397,7 @@ export function PreorderPage() {
                   Nomor WhatsApp cuma dipakai tim Pletok untuk konfirmasi
                   pesananmu & kirim kode ambil.
                 </p>
+                <NoRefund className="mt-1" />
                 <AdminContact className="mt-2" />
               </section>
 

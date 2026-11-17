@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
-import { ArrowLeft, Check, CheckCircle2, ChevronDown, Copy, Hourglass, ImageUp, KeyRound, Landmark, Loader2, MapPin, MessageCircle, Phone, QrCode, RefreshCw, Search, ShieldAlert, XCircle } from 'lucide-react'
+import { ArrowLeft, Ban, Check, CheckCircle2, ChevronDown, Copy, Hourglass, ImageUp, KeyRound, Landmark, Loader2, MapPin, MessageCircle, Phone, QrCode, RefreshCw, Search, ShieldAlert, XCircle } from 'lucide-react'
 import { ADMIN_NAME, ADMIN_WA, EVENT } from '../data/event'
 import { rupiah } from '../data/preorder'
 import { findOrders, lookupOrders, uploadProof, type OrderStatus, type PreorderConfig, type PublicOrder } from '../lib/backend'
@@ -106,6 +106,36 @@ export function useMyOrders() {
 
 /* ------------------------------------------------------------------ bits */
 
+/** whatever they type or paste — 0812…, 62812…, +62 812-… — down to the part after +62 ("812…") */
+export const waLocal = (raw: string) => {
+  let d = raw.replace(/\D/g, '')
+  if (d.startsWith('62')) d = d.slice(2)
+  else if (d.startsWith('0')) d = d.slice(1)
+  return d.slice(0, 13)
+}
+export const waValid = (local: string) => /^8\d{8,12}$/.test(local)
+const waGroups = (local: string) => [local.slice(0, 3), local.slice(3, 7), local.slice(7)].filter(Boolean).join('-')
+
+/** a WhatsApp field with a fixed +62 in front: typing 0…, 62… or +62… all land in the same place */
+export function WaInput({ value, onChange, placeholder = '812-3456-7890', className = '' }: { value: string; onChange: (local: string) => void; placeholder?: string; className?: string }) {
+  return (
+    <label className={`flex items-center rounded-2xl bg-cream-deep/80 font-display focus-within:ring-2 focus-within:ring-terracotta ${className}`}>
+      <span className="flex items-center gap-1.5 self-stretch border-r-2 border-brown/10 py-3.5 pl-3.5 pr-3 font-semibold text-brown/70">
+        <Phone className="size-4" /> +62
+      </span>
+      <input
+        value={waGroups(value)}
+        onChange={(e) => onChange(waLocal(e.target.value))}
+        inputMode="tel"
+        autoComplete="tel"
+        placeholder={placeholder}
+        aria-label="Nomor WhatsApp"
+        className="min-w-0 flex-1 bg-transparent p-3.5 tracking-wide outline-none"
+      />
+    </label>
+  )
+}
+
 const TONE: Record<OrderStatus, { label: string; short: string; bg: string; fg: string; Icon: typeof Check }> = {
   hold: { label: 'Menunggu verifikasi', short: 'Dicek', bg: '#e8b53a', fg: '#5a2e1a', Icon: Hourglass },
   process: { label: 'Terverifikasi', short: 'Lunas', bg: '#5e7b3a', fg: '#f5ebdd', Icon: CheckCircle2 },
@@ -196,19 +226,23 @@ export function MyOrdersList({ orders, onOpen }: { orders: MyOrder[]; onOpen: (i
  * thing people see. One box takes the kode cek (K7Q2MX) or the pickup code (elisha-007);
  * without either, WhatsApp number + name must both match.
  */
-export function FindOrder({ onFound, onOpen }: { onFound: (os: PublicOrder[]) => void; onOpen: (id: string) => void }) {
-  const [open, setOpen] = useState(false)
+export function FindOrder({ onFound, onOpen, notice }: { onFound: (os: PublicOrder[]) => void; onOpen: (id: string) => void; notice?: string }) {
+  const [open, setOpen] = useState(!!notice)
+  // a WhatsApp link that didn't resolve opens this, with why
+  useEffect(() => {
+    if (notice) setOpen(true)
+  }, [notice])
   const [mode, setMode] = useState<'ref' | 'wa'>('ref')
   const [ref, setRef] = useState('')
   const [wa, setWa] = useState('')
   const [name, setName] = useState('')
   const [state, setState] = useState<'idle' | 'busy' | 'none' | 'error'>('idle')
-  const ready = mode === 'ref' ? ref.replace(/[^a-z0-9]/gi, '').length >= 6 : wa.replace(/\D/g, '').length >= 9 && name.trim().length > 0
+  const ready = mode === 'ref' ? ref.replace(/[^a-z0-9]/gi, '').length >= 6 : waValid(wa) && name.trim().length > 0
   // not a <form>: it sits inside the order form, and a nested form would submit (reload) that one
   const submit = async () => {
     if (!ready || state === 'busy') return
     setState('busy')
-    const r = await findOrders(mode === 'ref' ? { ref: ref.trim() } : { wa, name })
+    const r = await findOrders(mode === 'ref' ? { ref: ref.trim() } : { wa: '0' + wa, name })
     if (!r) return setState('error')
     if (!r.length) return setState('none')
     setState('idle')
@@ -259,11 +293,12 @@ export function FindOrder({ onFound, onOpen }: { onFound: (os: PublicOrder[]) =>
                 </motion.div>
               ) : (
                 <motion.div key="wa" className="flex flex-col gap-2" initial={{ opacity: 0, filter: 'blur(4px)' }} animate={{ opacity: 1, filter: 'blur(0px)' }} exit={{ opacity: 0, filter: 'blur(4px)' }}>
-                  <input value={wa} onChange={(e) => setWa(e.target.value)} maxLength={20} inputMode="tel" placeholder="Nomor WhatsApp waktu pesan" className={input} />
+                  <WaInput value={wa} onChange={setWa} placeholder="Nomor WA waktu pesan" />
                   <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="Nama waktu pesan" className={input} />
                 </motion.div>
               )}
             </AnimatePresence>
+            {notice && state === 'idle' && <p className="font-cond text-sm italic text-terracotta">{notice}</p>}
             {state === 'none' && <p className="font-cond text-sm italic text-terracotta">Belum ketemu — cek lagi {mode === 'ref' ? 'kodenya' : 'nomor & namanya (harus sama dengan waktu pesan)'}.</p>}
             {state === 'error' && <p className="font-cond text-sm italic text-terracotta">Sinyalnya lagi susah — coba lagi ya.</p>}
             <button type="button" onClick={() => void submit()} disabled={!ready || state === 'busy'} className="flex items-center justify-center gap-2 rounded-full bg-brown py-3 font-display font-semibold text-cream disabled:opacity-40">
@@ -336,6 +371,18 @@ function ProofUpload({ order, onDone }: { order: MyOrder; onDone: () => void }) 
         {state === 'busy' ? <Loader2 className="size-5 animate-spin" /> : sent ? <CheckCircle2 className="size-6 text-leaf" /> : null}
       </motion.button>
     </div>
+  )
+}
+
+/** the team's rule, shown before ordering and again before paying */
+export function NoRefund({ className = '' }: { className?: string }) {
+  return (
+    <p className={`flex items-start gap-2 rounded-2xl bg-brown/5 p-3 text-left font-display text-sm text-brown-soft ${className}`}>
+      <Ban className="mt-0.5 size-4 shrink-0 text-terracotta" />
+      <span>
+        <span className="font-bold text-brown">No refund & no cancel.</span> Pesanan yang sudah dibayar nggak bisa dibatalkan atau diuangkan kembali — cek lagi pesanan & jadwal ambilnya sebelum transfer ya.
+      </span>
+    </p>
   )
 }
 
@@ -454,6 +501,7 @@ export function OrderTracker({ order, config, onBack, onProof, checkedAt }: { or
 
             <ProofUpload order={order} onDone={onProof} />
             <NoScam />
+            <NoRefund className="mt-3 w-full max-w-sm" />
 
             <ol className="mt-5 w-full max-w-sm space-y-2 text-left font-display text-brown-soft">
               {['Transfer persis sejumlah total di atas.', 'Upload screenshot bukti transfernya di sini.', 'Tim Pletok cek — halaman ini ikut berubah sendiri.', 'Kode ambil muncul di sini & kami kirim lewat WhatsApp.'].map((t, i) => (

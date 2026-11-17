@@ -1,7 +1,7 @@
 import { motion } from 'motion/react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowRight, Check, Crown, Download, ExternalLink, HelpCircle, Hourglass, ImageIcon, Lightbulb, Loader2, MessageCircle, MessageCircleHeart, PackageCheck, RefreshCw, ScanLine, Search, Send, Settings2, ShoppingBag, Sparkles, Star, ThumbsUp, Undo2, Users, Wallet, X } from 'lucide-react'
-import { EVENT } from '../data/event'
+import { EVENT, SITE_URL } from '../data/event'
 import { DRINKS } from '../data/menu'
 import { AnimatePresence } from 'motion/react'
 import { BACKEND, crewPin, fetchProof, fetchResults, updateOrder, type Order, type OrderStatus, type Response, type Results } from '../lib/backend'
@@ -127,15 +127,17 @@ const waLink = (wa: string, text: string) => {
 /** when & where — every message ends with it */
 // plain ">" bullets: emoji arrive as "�" on some phones through a wa.me link
 const PICKUP = `> Ambil di ${EVENT.table}, ${EVENT.place} · ${EVENT.campus}\n> ${EVENT.dateLabel}, ${EVENT.timeLabel}`
+/** the order's own live status page — /c/KODECEK opens it straight away, no searching */
+const statusLink = (o: Order) => (o.ref ? `\n\nCek status pesananmu kapan aja:\n${SITE_URL.replace(/^https?:\/\//, '')}/c/${o.ref}` : '')
 const codeMessage = (o: Order) =>
-  `Halo kak ${o.name}! Pembayaran pre-order Pletok kamu sudah kami terima.\n\n> Kode ambil: *${o.code}*\n> Pesanan: ${o.summary} (${rupiah(o.total)})\n\n${PICKUP}\n\nTunjukkan kode ini + sebutkan nama ya. Makasih!`
+  `Halo kak ${o.name}! Pembayaran pre-order Pletok kamu sudah kami terima.\n\n> Kode ambil: *${o.code}*\n> Pesanan: ${o.summary} (${rupiah(o.total)})\n\n${PICKUP}\n\nTunjukkan kode ini + sebutkan nama ya. Makasih!${statusLink(o)}`
 /** the WhatsApp button on every other status — the code (or kode cek before it's paid) and the pickup */
 const contactMessage = (o: Order) =>
   o.status === 'hold'
-    ? `Halo kak ${o.name}! Dari Pletok, soal pre-order kamu: ${o.summary} (${rupiah(o.total)})${o.ref ? `, kode cek *${o.ref}*` : ''}.\n\nKami lagi cek transfernya — begitu masuk, kode ambilmu kami kirim di sini.\n\n${PICKUP}`
+    ? `Halo kak ${o.name}! Dari Pletok, soal pre-order kamu: ${o.summary} (${rupiah(o.total)})${o.ref ? `, kode cek *${o.ref}*` : ''}.\n\nKami lagi cek transfernya — begitu masuk, kode ambilmu kami kirim di sini.\n\n${PICKUP}${statusLink(o)}`
     : o.status === 'rejected'
-      ? `Halo kak ${o.name}! Dari Pletok, soal pre-order kamu: ${o.summary} (${rupiah(o.total)})${o.ref ? `, kode cek *${o.ref}*` : ''}.\n\nTransfernya belum kami temukan — boleh kirim bukti transfernya di sini?\n\n${PICKUP}`
-      : `Halo kak ${o.name}! Dari Pletok, soal pre-order *${o.code}*: ${o.summary}.\n\n${PICKUP}`
+      ? `Halo kak ${o.name}! Dari Pletok, soal pre-order kamu: ${o.summary} (${rupiah(o.total)})${o.ref ? `, kode cek *${o.ref}*` : ''}.\n\nTransfernya belum kami temukan — boleh kirim bukti transfernya di sini?\n\n${PICKUP}${statusLink(o)}`
+      : `Halo kak ${o.name}! Dari Pletok, soal pre-order *${o.code}*: ${o.summary}.\n\n${PICKUP}${statusLink(o)}`
 
 type Patch = { status?: OrderStatus; sent?: boolean }
 /** same as nextCode_ in Code.gs — for the demo only */

@@ -14,6 +14,10 @@ import { ErrorBoundary, ErrorPage, type ErrorKind } from './views/ErrorPage'
 import { beforeSend, installClickTracking, trackSource } from './lib/analytics'
 import './index.css'
 
+// short order link from WhatsApp: /c/DSK54N → /preorder?cek=DSK54N (opens that order's live status)
+const short = window.location.pathname.match(/^\/c\/([A-Za-z0-9-]{4,20})\/?$/)?.[1]
+if (short) history.replaceState(null, '', `/preorder?cek=${encodeURIComponent(short)}`)
+
 // small standalone pages (no booth app around them): the QR's links page, the form, old /go hops
 const path = window.location.pathname.replace(/\/+$/, '')
 const hop = path.match(/^\/go\/(ig|feedback)$/)?.[1] as HopTarget | undefined
