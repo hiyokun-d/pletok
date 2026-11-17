@@ -1,11 +1,14 @@
 import { motion } from 'motion/react'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Check, Crown, Download, ExternalLink, HelpCircle, Lightbulb, Loader2, Lock, MessageCircle, MessageCircleHeart, RefreshCw, ScanLine, Search, ShieldCheck, ShoppingBag, Sparkles, Star, ThumbsUp, Users, Wallet } from 'lucide-react'
+import { Ban, Check, Crown, DoorClosed, PackageCheck, RotateCcw, UtensilsCrossed, Download, ExternalLink, HelpCircle, Lightbulb, Loader2, Lock, MessageCircle, MessageCircleHeart, RefreshCw, ScanLine, Search, ShieldCheck, ShoppingBag, Sparkles, Star, ThumbsUp, Users, Wallet } from 'lucide-react'
 import { EVENT } from '../data/event'
 import { DRINKS } from '../data/menu'
 import { BACKEND, crewPin, fetchResults, savePreorderConfig, setCrewPin, setFeedbackModeRemote, setOrderDone, type Order, type PreorderConfig, type Response, type Results } from '../lib/backend'
 import { DEFAULT_CUTOFF, DEFAULT_PREORDER, PREORDER_ITEMS, rupiah } from '../data/preorder'
 import { usePreorder } from '../hooks/usePreorder'
+import { resetMenu, setBundleForced, setBundleItems, setClosedEarly, setDrinkSold, useMenu, useMenuSync } from '../hooks/useMenu'
+import { useEventPhase } from '../hooks/useEventPhase'
+import type { DrinkId } from '../data/menu'
 import { useFeedbackOpen, type FeedbackMode } from '../hooks/useFeedbackOpen'
 import { spring } from '../lib/motion'
 
@@ -95,6 +98,7 @@ export function HasilPage() {
         </div>
       </header>
 
+      <MenuAdmin />
       <AdminPanel demo={DEMO} save={(m) => (DEMO ? wait(1200).then(() => true) : setFeedbackModeRemote(pin, m))} />
       <PreorderAdmin
         remote={DEMO ? demoPreorder : preorder.config}
@@ -199,6 +203,143 @@ function AdminPanel({ save, demo }: { save: (m: FeedbackMode) => Promise<boolean
         })}
       </div>
     </section>
+  )
+}
+
+/* ------------------------------------------------------------------ live menu */
+
+const nextDrink = (id: DrinkId) => DRINKS[(DRINKS.findIndex((d) => d.id === id) + 1) % DRINKS.length].id
+
+/**
+ * What's still on sale, from any crew phone: mark drinks SOLD (bundles with that drink follow),
+ * swap a bundle's cups, close early, restock. Saved in the Sheet; the booth screen and every
+ * phone follow. Anything not in the Sheet yet is yellow.
+ */
+function MenuAdmin() {
+  const menu = useMenu()
+  const sync = useMenuSync()
+  const { phase } = useEventPhase()
+  const selling = phase === 'open' || phase === 'last-call'
+  const r = sync.remote
+  const drinkWait = (id: DrinkId) => sync.pending && (!r || r.drinks.find((d) => d.id === id)?.soldOut !== menu.drinks.find((d) => d.id === id)?.soldOut)
+  const bundleWait = (name: string) => {
+    if (!sync.pending) return false
+    const a = menu.bundles.find((b) => b.name === name)
+    const b = r?.bundles.find((x) => x.name === name)
+    return !b || a?.items.join() !== b.items.join() || a?.reason !== b.reason
+  }
+  const yellow = (on: boolean) => (on ? { boxShadow: `inset 0 0 0 2px ${WAIT}` } : undefined)
+
+  return (
+    <Card
+      className="mt-6"
+      title={
+        <span className="flex flex-wrap items-center gap-2">
+          <UtensilsCrossed className="size-5 text-terracotta" /> Menu hari ini
+          <span
+            className={`rounded-full px-2.5 py-0.5 font-cond text-sm font-semibold italic ${sync.pending ? 'text-brown' : menu.closedEarly ? 'bg-brown text-cream' : menu.allSoldOut ? 'bg-terracotta text-cream' : 'bg-leaf text-cream'}`}
+            style={sync.pending ? { background: WAIT } : undefined}
+          >
+            {sync.pending ? 'menyimpan…' : menu.closedEarly ? 'booth ditutup' : menu.allSoldOut ? 'semua habis' : menu.anySoldOut ? 'sebagian habis' : 'semua tersedia'}
+          </span>
+        </span>
+      }
+      meta={sync.failed ? 'Gagal menyimpan — cek sinyal / PIN' : 'Layar booth & semua HP ikut dalam ±10–30 detik'}
+    >
+      <p className="mb-2 font-cond text-sm font-semibold uppercase italic tracking-[0.25em] text-brown/50">Minuman — ketuk kalau habis</p>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {menu.drinks.map((d) => {
+          const wait = drinkWait(d.id)
+          return (
+            <button
+              key={d.id}
+              onClick={() => setDrinkSold(d.id, !d.soldOut)}
+              aria-pressed={d.soldOut}
+              className={`flex items-center gap-3 rounded-2xl border-2 p-3 text-left transition-colors ${d.soldOut ? 'border-terracotta bg-terracotta/10' : 'border-brown/10 bg-cream'}`}
+              style={wait ? { borderColor: WAIT } : undefined}
+            >
+              <img src={d.image} alt="" className={`h-12 w-auto shrink-0 object-contain ${d.soldOut ? 'opacity-60 grayscale' : ''}`} />
+              <span className="min-w-0 flex-1 leading-tight">
+                <span className="block font-display font-semibold">{d.short}</span>
+                <span className="font-cond text-sm italic text-brown/60">{d.soldOut ? `SOLD · ${hhmm(d.soldAt!)}` : `${d.price}K · tersedia`}</span>
+              </span>
+              {wait ? <Loader2 className="size-5 shrink-0 animate-spin text-brown" /> : d.soldOut ? <Ban className="size-5 shrink-0 text-terracotta" /> : <Check className="size-5 shrink-0 text-leaf" />}
+            </button>
+          )
+        })}
+      </div>
+
+      <p className="mb-2 mt-5 font-cond text-sm font-semibold uppercase italic tracking-[0.25em] text-brown/50">Paket — ketuk gelasnya untuk ganti isi</p>
+      <div className="flex flex-col gap-2">
+        {menu.bundles.map((b) => {
+          const wait = bundleWait(b.name)
+          return (
+            <div key={b.name} className={`flex flex-wrap items-center gap-3 rounded-2xl border-2 p-2.5 ${b.soldOut ? 'border-terracotta/50 bg-terracotta/5' : 'border-brown/10 bg-cream'}`} style={wait ? { borderColor: WAIT } : undefined}>
+              <div className="flex gap-1">
+                {b.items.map((id, slot) => {
+                  const d = menu.drinks.find((x) => x.id === id)!
+                  return (
+                    <motion.button
+                      key={slot}
+                      title="Ganti isi"
+                      whileTap={{ scale: 0.85 }}
+                      onClick={() => setBundleItems(b.name, b.items.map((x, i) => (i === slot ? nextDrink(x) : x)))}
+                      className="grid size-12 place-items-center rounded-xl bg-cream-deep/70"
+                    >
+                      <img src={d.image} alt={d.short} className={`h-10 w-auto object-contain ${d.soldOut ? 'opacity-50 grayscale' : ''}`} />
+                    </motion.button>
+                  )
+                })}
+              </div>
+              <div className="min-w-0 flex-1 basis-40 leading-tight">
+                <p className="font-display font-semibold">
+                  {b.name.replace('Paket ', '')} · {b.price}K {b.edited && <span className="ml-1 rounded-full bg-spice/25 px-1.5 font-cond text-xs italic">diubah</span>}
+                </p>
+                <p className="font-cond text-sm italic text-brown/60">{b.detail}</p>
+              </div>
+              <span className={`flex items-center gap-1 rounded-full px-2.5 py-1 font-cond text-xs font-semibold italic ${wait ? 'text-brown' : b.soldOut ? 'bg-terracotta text-cream' : 'bg-leaf text-cream'}`} style={wait ? { background: WAIT } : undefined}>
+                {wait && <Loader2 className="size-3 animate-spin" />}
+                {b.soldOut ? (b.reason === 'manual' ? 'SOLD · manual' : `SOLD · ${b.reason} habis`) : 'tersedia'}
+              </span>
+              <div className="flex gap-1">
+                {b.edited && (
+                  <button onClick={() => setBundleItems(b.name, null)} className="rounded-full border-2 border-brown/15 px-3 py-1 font-display text-xs font-semibold">
+                    isi asli
+                  </button>
+                )}
+                <button onClick={() => setBundleForced(b.name, b.reason !== 'manual')} className="rounded-full border-2 border-brown/15 px-3 py-1 font-display text-xs font-semibold">
+                  {b.reason === 'manual' ? 'buka lagi' : 'paksa sold'}
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-brown/10 pt-4">
+        <p className="max-w-md font-cond text-sm italic text-brown/60">
+          Semua minuman habis → layar booth otomatis menampilkan &ldquo;Ludes terjual&rdquo;. Kalau mau langsung pamit, tekan Tutup sekarang.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {(menu.closedEarly || (menu.allSoldOut && selling)) && (
+            <button
+              onClick={() => setClosedEarly(!menu.closedEarly)}
+              className="flex items-center gap-2 rounded-full bg-brown px-4 py-2.5 font-display text-sm font-semibold text-cream"
+              style={yellow(sync.pending && !!r && r.closedEarly !== menu.closedEarly)}
+            >
+              <DoorClosed className="size-4" /> {menu.closedEarly ? 'Buka booth lagi' : 'Tutup sekarang'}
+            </button>
+          )}
+          <button
+            onClick={resetMenu}
+            disabled={!menu.anySoldOut && !menu.bundles.some((b) => b.edited) && !menu.closedEarly}
+            className="flex items-center gap-2 rounded-full bg-leaf px-4 py-2.5 font-display text-sm font-semibold text-cream disabled:opacity-40"
+          >
+            {menu.allSoldOut ? <PackageCheck className="size-4" /> : <RotateCcw className="size-4" />} Restock semua
+          </button>
+        </div>
+      </div>
+    </Card>
   )
 }
 

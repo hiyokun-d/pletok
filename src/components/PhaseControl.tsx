@@ -49,7 +49,7 @@ const fromWib = (v: string) => Date.parse(`${v.length === 16 ? `${v}:00` : v}+07
  */
 export function PhaseControl() {
   const [open, setOpen] = useState(false)
-  // one crew panel at a time: opening this one closes A + C, and the other way round
+  // the menu panel moved to /hasil; still listens so an old signal can't leave two panels open
   useEffect(() => {
     if (open) signal.emit('panel-booth')
   }, [open])

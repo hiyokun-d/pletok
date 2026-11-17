@@ -105,8 +105,8 @@ Force one with `?view=desktop` or `?view=mobile`.
 
 On phones a small "dynamic island" pill shows the countdown during pre-open.
 
-### Sold out (A + C)
-Mark a drink SOLD and it gets a stamp + grey-out everywhere; every bundle containing it goes SOLD automatically. To keep a bundle on sale, tap its cups in the panel to swap them (e.g. Duo Klasik → 2 Original — the "was" price recalculates) or press *isi asli* to undo. When **every** drink is SOLD during open/last call, the booth switches to the **"Ludes terjual!"** thank-you (we don't restock); The sold-out screen counts down to the official close; to call it a day early, press *Tutup sekarang* in A + C and the closing show plays. *Restock semua (reset)* brings everything back. Only one crew panel (A + B / A + C) is open at a time. State is saved on that device and survives refresh (with the Sheet connected and the crew PIN entered in A + C, every phone follows within ~30 s).
+### Sold out (/hasil → Menu hari ini)
+From any crew phone on `/hasil` (PIN), mark a drink SOLD and it gets a stamp + grey-out everywhere; every bundle containing it goes SOLD automatically. To keep a bundle on sale, tap its cups on /hasil to swap them (e.g. Duo Klasik → 2 Original — the "was" price recalculates) or press *isi asli* to undo. When **every** drink is SOLD during open/last call, the booth switches to the **"Ludes terjual!"** thank-you (we don't restock); The sold-out screen counts down to the official close; to call it a day early, press *Tutup sekarang* on /hasil and the closing show plays on the booth screen. *Restock semua* brings everything back (and reopens). Changes are saved in the Sheet; the booth screen follows within ~10 s and phones within ~30 s. A control stays yellow until the Sheet has it.
 
 ### Easter egg
 Tap the logo's leaf or **"Kenapa namanya Pletok?"** → a 3D glass gets stirred and knocked: *PLE! … TOK!* Visitors can tap the glass to knock it themselves, and read the three stories behind the name.
@@ -120,7 +120,6 @@ Tap the logo's leaf or **"Kenapa namanya Pletok?"** → a 3D glass gets stirred 
 | **A + B** | Open the **Kontrol Booth** panel (touch: long-press the bottom-left corner) |
 | **A + G** | **Tarik perhatian!** — a loud 7-second show (PSST! HAUS? SINI! → cups → "Cobain di Meja 9!") to pull people in |
 | **A + T** | **Spam hype** — every press pops a sticker (PLE! TOK! HALAL! MEJA 9!) or a cup with a burst; mash or hold it for more |
-| **A + C** | Open the **Kontrol Menu** panel — mark drinks SOLD, swap a bundle's cups, *Restock semua* to reset |
 | **A + F** | Full screen on/off — while full screen, the laptop **won't sleep** |
 | **Esc** | Skip the grand opening |
 
@@ -183,7 +182,7 @@ Use a different `?src=` per group or broadcast to see which one brought the most
 
 **Results page → `/hasil` (crew PIN):** a Google-Forms-style summary, live from the Sheet every 30 s — headline numbers, rating chart, favourite drinks (% of people, ties all get the *Favorit* badge), answers per 15 min, every Like / Wishes / Questions / Ideas answer, the contact list, **Unduh CSV** and **Buka Google Sheet**. Linked from the A + B panel. Locally, `/hasil?demo` shows sample data (dev only).
 
-**Closing screen ("Hari ini di Meja 9"):** QR scans, feedback count, people OK to be contacted, average rating and favourite menu (ties show every leader, e.g. "Original & Yakult") — live from the Sheet (they show *segera* until it's connected), plus the real sell-out order from A + C. Website visitor totals are only in the Vercel dashboard.
+**Closing screen ("Hari ini di Meja 9"):** QR scans, feedback count, people OK to be contacted, average rating and favourite menu (ties show every leader, e.g. "Original & Yakult") — live from the Sheet (they show *segera* until it's connected), plus the real sell-out order from /hasil. Website visitor totals are only in the Vercel dashboard.
 
 **Booth laptop:** turn on *"Laptop booth — jangan dihitung"* in the A + B panel so it doesn't count itself.
 
@@ -213,7 +212,6 @@ src/
     QrCanvas                     the QR code + QR-pattern background
     StirScene, PletokEgg         3D glass easter egg
     PhaseControl                 the A + B crew panel
-    MenuControl                  the A + C menu panel (sold out / bundle swaps / crew PIN sync)
     PhaseIsland                  phone countdown pill
     Countdown, EventStatus, DrinkSpotlight, CupCard, BundleCard, PriceTag, …
   hooks/

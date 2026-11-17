@@ -89,7 +89,7 @@ export async function fetchStats(): Promise<RemoteStats | null> {
   }
 }
 
-/** crew-only writes (sold-out sync) carry the PIN typed into the A + C panel on that laptop */
+/** crew-only writes (menu, admin) carry the PIN entered on /hasil on that device */
 const PIN_KEY = 'pletok:crew-pin'
 export const crewPin = () => {
   try {
@@ -199,6 +199,8 @@ export async function setOrderDone(pin: string, code: string, done: boolean): Pr
 }
 
 export const pushMenu = (state: unknown) => {
+  // dev /hasil?demo never touches the real menu
+  if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('demo')) return Promise.resolve(true)
   const pin = crewPin()
   return pin ? post({ type: 'menu', pin, state }) : Promise.resolve(false)
 }

@@ -3,12 +3,13 @@ import { BUNDLES, DRINKS, drinkById, type Bundle, type Drink, type DrinkId } fro
 import { BACKEND, onStats, pushMenu } from '../lib/backend'
 
 /**
- * Live menu state for the day, controlled from the A + C panel:
+ * Live menu state for the day, controlled from /hasil (admin, PIN) on any crew phone:
  *  - a drink can be marked SOLD (sold-out time is remembered for the closing screen)
  *  - a bundle is SOLD automatically when any cup in it is sold out — unless the operator swaps
  *    its cups (e.g. Duo Klasik → 2 Original), or forces it sold by hand
- * Persisted per device and synced across tabs; with the Google Sheet backend the crew laptop
- * (PIN set in A + C) pushes every change and all phones pick it up within ~30 s.
+ *  - "tutup sekarang": close the booth early once everything's gone
+ * Persisted per device and synced across tabs; every change from /hasil is saved in the Sheet
+ * and the booth screen + all phones pick it up within ~10–30 s.
  */
 
 interface BundleOverride {
@@ -18,6 +19,8 @@ interface BundleOverride {
 interface MenuState {
   soldAt: Partial<Record<DrinkId, number>>
   bundles: Record<string, BundleOverride>
+  /** the crew closed the booth early (everything sold) */
+  closedAt?: number
   /** last change, to tell the newer copy apart when syncing */
   at?: number
 }
@@ -38,6 +41,7 @@ export interface LiveMenu {
   bundles: LiveBundle[]
   allSoldOut: boolean
   anySoldOut: boolean
+  closedEarly: boolean
 }
 
 const KEY = 'pletok:menu'
@@ -61,7 +65,17 @@ function commit(next: MenuState, push = true) {
     /* storage blocked — still works until refresh */
   }
   listeners.forEach((l) => l())
-  if (push) void pushMenu(state)
+  if (push) {
+    failed = false
+    const sent = state
+    void pushMenu(state).then((ok) => {
+      // didn't reach the Sheet → back to what the Sheet has, and say so
+      if (ok || state !== sent) return
+      failed = true
+      if (remote) commit(remote, false)
+      else listeners.forEach((l) => l())
+    })
+  }
 }
 
 // another tab (e.g. the crew opened the site twice) changed it → follow along
@@ -95,13 +109,23 @@ function derive(s: MenuState): LiveMenu {
     return { ...b, items, normal, detail: edited ? describe(items) : b.detail, soldOut: !!reason, reason, edited }
   })
   const allSoldOut = drinks.every((d) => d.soldOut)
-  return { drinks, bundles, allSoldOut, anySoldOut: drinks.some((d) => d.soldOut) || bundles.some((b) => b.soldOut) }
+  return { drinks, bundles, allSoldOut, anySoldOut: drinks.some((d) => d.soldOut) || bundles.some((b) => b.soldOut), closedEarly: !!s.closedAt }
 }
 
 // set up after the helpers above — derive() needs describe() when a saved bundle was edited
 let state = load()
 let snap = derive(state)
 const listeners = new Set<() => void>()
+// what the Sheet last told us, and whether our last save bounced
+let remote: MenuState | null = null
+let remoteSnap: LiveMenu | null = null
+let failed = false
+let syncSnap: { remote: LiveMenu | null; failed: boolean; pending: boolean } = { remote: remoteSnap, failed, pending: false }
+const syncState = () => {
+  const pending = !!BACKEND && !failed && (state.at ?? 0) > (remote?.at ?? 0)
+  if (syncSnap.remote !== remoteSnap || syncSnap.failed !== failed || syncSnap.pending !== pending) syncSnap = { remote: remoteSnap, failed, pending }
+  return syncSnap
+}
 
 // someone else (the crew laptop) changed it → take the newer copy
 let syncing = false
@@ -109,8 +133,12 @@ function startSync() {
   if (syncing || !BACKEND) return
   syncing = true
   onStats((s) => {
-    const remote = s.menu?.state as MenuState | undefined
-    if (remote?.soldAt && remote.bundles && (remote.at ?? 0) > (state.at ?? 0)) commit(remote, false)
+    const r = s.menu?.state as MenuState | undefined
+    if (!r?.soldAt || !r.bundles) return
+    remote = r
+    remoteSnap = derive(r)
+    if ((r.at ?? 0) > (state.at ?? 0)) commit(r, false)
+    else listeners.forEach((l) => l())
   })
 }
 
@@ -124,7 +152,12 @@ export function useMenu(): LiveMenu {
   return useSyncExternalStore(subscribe, () => snap)
 }
 
-/* ---- operator actions (A + C panel) */
+/** for the admin: the Sheet's copy (to colour what's still saving), saving / failed */
+export function useMenuSync() {
+  return useSyncExternalStore(subscribe, syncState)
+}
+
+/* ---- operator actions (/hasil) */
 
 export function setDrinkSold(id: DrinkId, sold: boolean) {
   const soldAt = { ...state.soldAt }
@@ -143,7 +176,12 @@ export function setBundleForced(name: string, forced: boolean) {
   commit({ ...state, bundles: { ...state.bundles, [name]: { ...cur, forced } } })
 }
 
-/** restock: everything back on sale, bundles back to their recipe */
+/** everything's gone → close the booth now instead of waiting for 16:00 (undo: `false`) */
+export function setClosedEarly(closed: boolean) {
+  commit({ ...state, closedAt: closed ? Date.now() : undefined })
+}
+
+/** restock: everything back on sale, bundles back to their recipe, booth open again */
 export function resetMenu() {
   commit(empty())
 }

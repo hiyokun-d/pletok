@@ -1,7 +1,8 @@
 import { motion } from 'motion/react'
+import { MessageCircleHeart } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { DRINKS } from '../data/menu'
-import { EVENT, INSTAGRAM_HANDLE, INSTAGRAM_URL, QR_LINKS } from '../data/event'
+import { EVENT, FEEDBACK_URL, INSTAGRAM_HANDLE, INSTAGRAM_URL, QR_LINKS } from '../data/event'
 import { useMenu } from '../hooks/useMenu'
 import { useFeedbackOpen } from '../hooks/useFeedbackOpen'
 import { useEventPhase } from '../hooks/useEventPhase'
@@ -14,7 +15,7 @@ import { spring } from '../lib/motion'
 const clock = (ms: number) => new Date(ms).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit' })
 
 /**
- * Every drink is marked SOLD in the A + C panel → we're not restocking, so the booth stops
+ * Every drink is marked SOLD on /hasil → we're not restocking, so the booth stops
  * selling and says thanks: the cups hop in, get stamped one by one, then the big "Ludes!"
  * lands with confetti. "Restock semua" in the panel brings the menu straight back.
  */
@@ -84,13 +85,30 @@ export function SoldOutStage({ desktop }: { desktop: boolean }) {
               Habis duluan: {order.map((d) => `${d.short} (${clock(d.soldAt!)})`).join(' → ')}
             </p>
           )}
-          <a
-            href={INSTAGRAM_URL}
-            data-track="soldout-instagram"
-            className="mt-[3vh] inline-flex items-center gap-2 rounded-full border-2 border-cream/30 px-6 py-3 font-display font-semibold hover:bg-cream/10"
-          >
-            <InstagramIcon /> Follow {INSTAGRAM_HANDLE}
-          </a>
+          {/* sold out, but the feedback form is still open — that's what we want from them now */}
+          {feedback && (
+            <p className="mt-[2.4vh] font-script text-[clamp(1.6rem,4vh,2.4rem)] font-bold leading-tight text-yakult">
+              Udah nyobain? Kami nungguin feedback-mu :)
+            </p>
+          )}
+          <div className="mt-[2.4vh] flex flex-wrap justify-center gap-3">
+            {feedback && (
+              <a
+                href={FEEDBACK_URL}
+                data-track="soldout-feedback"
+                className="inline-flex items-center gap-2 rounded-full bg-yakult px-6 py-3 font-display font-semibold text-brown shadow-[0_5px_0_#c9a46e]"
+              >
+                <MessageCircleHeart className="size-5" /> Kasih feedback
+              </a>
+            )}
+            <a
+              href={INSTAGRAM_URL}
+              data-track="soldout-instagram"
+              className="inline-flex items-center gap-2 rounded-full border-2 border-cream/30 px-6 py-3 font-display font-semibold hover:bg-cream/10"
+            >
+              <InstagramIcon /> Follow {INSTAGRAM_HANDLE}
+            </a>
+          </div>
         </motion.div>
       </div>
 
@@ -102,10 +120,10 @@ export function SoldOutStage({ desktop }: { desktop: boolean }) {
           transition={{ ...spring.glide, delay: 0.6 }}
         >
           <QrCanvas value={QR_LINKS} className="size-[min(20vh,180px)]" />
-          <p className="font-display text-sm font-semibold">{feedback ? 'Kasih feedback & follow kami' : 'Follow kami buat event berikutnya'}</p>
+          <p className="font-display text-sm font-semibold">{feedback ? 'Scan & kasih feedback — kami nungguin :)' : 'Follow kami buat event berikutnya'}</p>
         </motion.div>
       )}
-      {/* the booth stays up until the official close (or the crew taps "Tutup sekarang" in A + C) */}
+      {/* the booth stays up until the official close (or the crew taps "Tutup sekarang" on /hasil) */}
       <motion.div
         className="absolute left-1/2 top-[3vh] flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/25 px-4 py-2 font-display text-[clamp(0.85rem,1.9vh,1.05rem)] font-semibold ring-1 ring-cream/10"
         initial={{ y: -30, opacity: 0 }}

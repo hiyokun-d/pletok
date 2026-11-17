@@ -17,7 +17,7 @@ Every feedback, every QR scan and the sold-out state are saved in **one Google S
 5. Copy the **Web app URL** (`https://script.google.com/macros/s/…/exec`) and paste it to Claude, or set it yourself:
    - in Vercel → Project → Settings → Environment Variables: `VITE_BACKEND_URL` = that URL, then **Redeploy**;
    - locally, in `.env.local` (not committed): `VITE_BACKEND_URL=…`
-6. On the booth laptop, open **A + C**, enter the PIN, then press **Sambung**. Sold-out changes now reach every phone.
+6. Crew: open **`/hasil`** on your phone and enter the PIN. The **Menu hari ini** card marks drinks sold out, swaps bundle cups, closes early or restocks. The booth screen and every phone follow; the Sheet keeps it as the script property `MENU`.
 7. Admins: open **`/hasil`** with the PIN. From there you can:
    - see the results;
    - open or close the feedback form remotely (saved as the script property `FEEDBACK_MODE`);

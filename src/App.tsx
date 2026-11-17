@@ -15,7 +15,6 @@ import { ClosingSequence } from './views/ClosingSequence'
 import { GrandOpening } from './views/GrandOpening'
 import { AttentionShow } from './components/AttentionShow'
 import { HypeLayer } from './components/HypeLayer'
-import { MenuControl } from './components/MenuControl'
 import { SoldOutStage } from './views/SoldOutStage'
 import { useMenu } from './hooks/useMenu'
 
@@ -23,12 +22,15 @@ const skipIntro = new URLSearchParams(window.location.search).has('nointro')
 
 export default function App() {
   const { phase, remaining, daysAway, now } = useEventPhase()
-  // every drink marked SOLD (A + C) while we're open → the sold-out thank-you replaces the booth
-  const soldOut = useMenu().allSoldOut && (phase === 'open' || phase === 'last-call')
+  // every drink marked SOLD (from /hasil) while we're open → the sold-out thank-you replaces the booth;
+  // "Tutup sekarang" there skips straight to the closing show
+  const menu = useMenu()
+  const selling = phase === 'open' || phase === 'last-call'
+  const soldOut = menu.allSoldOut && selling
   // desktop pre-open: the countdown stage from the day before (or under 23h); earlier, a preview dashboard
   const countdownStage = phase === 'pre-open' && (daysAway <= 1 || remaining < 23 * 3600_000)
   const desktop = useIsDesktop()
-  const closed = phase === 'closed'
+  const closed = phase === 'closed' || (menu.closedEarly && selling)
   const [intro, setIntro] = useState(!skipIntro && !closed)
   const [egg, setEgg] = useState(false)
   const [attention, setAttention] = useState(0)
@@ -93,7 +95,6 @@ export default function App() {
       <AnimatePresence>{!desktop && !intro && !grand && !egg && phase === 'pre-open' && <PhaseIsland key="island" />}</AnimatePresence>
       <HypeLayer />
       <PhaseControl />
-      <MenuControl />
     </MotionConfig>
   )
 }
