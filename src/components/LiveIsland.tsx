@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { BadgePercent, CupSoda, MapPin, MessageCircleHeart, MessageCircleOff, PackageCheck, PartyPopper, RefreshCw, ShoppingBag, Wifi, WifiOff, type LucideIcon } from 'lucide-react'
+import { BadgePercent, CupSoda, Gift, MapPin, MessageCircleHeart, MessageCircleOff, PackageCheck, PartyPopper, RefreshCw, ShoppingBag, Wifi, WifiOff, type LucideIcon } from 'lucide-react'
 import { useEventPhase, type Phase } from '../hooks/useEventPhase'
 import { useMenu, type LiveMenu } from '../hooks/useMenu'
 import { usePreorder } from '../hooks/usePreorder'
@@ -9,6 +9,7 @@ import { BACKEND, onStats } from '../lib/backend'
 import { EVENT } from '../data/event'
 import { Countdown } from './Countdown'
 import { SignalBars } from './SignalBars'
+import { Morph } from './Morph'
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const clock = (ms: number) => {
@@ -178,13 +179,26 @@ export function LiveIsland({ phaseBase, hidden, desktop }: { phaseBase: boolean;
     return () => window.clearTimeout(t)
   }, [phase])
 
+  // a second live activity, iOS-style: once the promo card has scrolled away, a small bubble splits
+  // off the island with the slots left — tap → /preorder
+  const { open: poOpen, config: po, promoLeft } = usePreorder()
+  const [scrolled, setScrolled] = useState(false)
+  useEffect(() => {
+    if (desktop) return
+    const on = () => setScrolled(window.scrollY > 320)
+    on()
+    window.addEventListener('scroll', on, { passive: true })
+    return () => window.removeEventListener('scroll', on)
+  }, [desktop])
+  const bubble = !desktop && !hidden && !open && scrolled && poOpen && !!po.promo?.on && promoLeft > 0
+
   const t = TONE[phase]
   const live = phase === 'open' || phase === 'last-call'
   const compactTime = phase === 'pre-open' && daysAway >= 2 ? `${daysAway} hari lagi` : phase === 'pre-open' && daysAway === 1 ? `Besok · ${clock(remaining)}` : clock(remaining)
   const view = note ? `note-${note.id}` : open ? 'open' : 'compact'
 
   return (
-    <div className={`pointer-events-none fixed z-[60] flex ${desktop ? 'right-[2.5vw] top-[1.5vh] justify-end' : 'inset-x-0 top-2 justify-center px-3'}`}>
+    <div className={`pointer-events-none fixed z-[60] flex items-start ${desktop ? 'right-[2.5vw] top-[1.5vh] justify-end' : 'inset-x-0 top-2 justify-center gap-2 px-3'}`}>
       <AnimatePresence>
         {show && (
           <motion.button
@@ -270,6 +284,30 @@ export function LiveIsland({ phaseBase, hidden, desktop }: { phaseBase: boolean;
               </AnimatePresence>
             </motion.div>
           </motion.button>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {bubble && (
+          <motion.a
+            key="promo-bubble"
+            layout
+            href="/preorder"
+            data-track="island-promo"
+            aria-label={`Promo pre-order: sisa ${promoLeft} slot`}
+            className="pointer-events-auto flex h-9 items-center gap-1.5 rounded-full bg-[#1a0d06] pl-2.5 pr-3 font-display text-sm font-bold text-cream shadow-[0_12px_32px_-10px_rgb(0_0_0/0.55)]"
+            // pinches off the side of the island like a droplet, and merges back the same way
+            initial={{ opacity: 0, scale: 0.3, x: -36, filter: 'blur(6px)' }}
+            animate={{ opacity: 1, scale: 1, x: 0, filter: 'blur(0px)' }}
+            exit={{ opacity: 0, scale: 0.3, x: -36, filter: 'blur(6px)', transition: { duration: 0.3 } }}
+            transition={ISLAND}
+            whileTap={{ scale: 0.9 }}
+          >
+            <motion.span animate={{ rotate: [0, -14, 12, -8, 0] }} transition={{ duration: 0.9, repeat: Infinity, repeatDelay: 3 }}>
+              <Gift className="size-4" style={{ color: GREEN }} />
+            </motion.span>
+            <Morph text={String(promoLeft)} className="tabular-nums" />
+            <span className="font-normal text-cream/60">slot</span>
+          </motion.a>
         )}
       </AnimatePresence>
     </div>

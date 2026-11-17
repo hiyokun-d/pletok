@@ -128,9 +128,11 @@ const waLink = (wa: string, text: string) => {
 // plain ">" bullets: emoji arrive as "�" on some phones through a wa.me link
 const PICKUP = `> Ambil di ${EVENT.table}, ${EVENT.place} · ${EVENT.campus}\n> ${EVENT.dateLabel}, ${EVENT.timeLabel}`
 /** the order's own live status page — /c/KODECEK opens it straight away, no searching */
-const statusLink = (o: Order) => (o.ref ? `\n\nCek status pesananmu kapan aja:\n${SITE_URL.replace(/^https?:\/\//, '')}/c/${o.ref}` : '')
+// every message carries it: the page shows the order (and the code, big) — no searching, and the
+// cashier can read it straight off the phone. Built from the private kode cek, never the PLT number.
+const statusLink = (o: Order) => (o.ref ? `\n\nCek status & kode ambilmu di sini:\n${SITE_URL.replace(/^https?:\/\//, '')}/c/${o.ref}` : '')
 const codeMessage = (o: Order) =>
-  `Halo kak ${o.name}! Pembayaran pre-order Pletok kamu sudah kami terima.\n\n> Kode ambil: *${o.code}*\n> Pesanan: ${o.summary} (${rupiah(o.total)})\n\n${PICKUP}\n\nTunjukkan kode ini + sebutkan nama ya. Makasih!${statusLink(o)}`
+  `Halo kak ${o.name}! Pembayaran pre-order Pletok kamu sudah kami terima.\n\n> Kode ambil: *${o.code}*\n> Pesanan: ${o.summary} (${rupiah(o.total)})${statusLink(o)}\n\n${PICKUP}\n\nTunjukkan kode ini (atau halaman di link) + sebutkan nama ya. Makasih!`
 /** the WhatsApp button on every other status — the code (or kode cek before it's paid) and the pickup */
 const contactMessage = (o: Order) =>
   o.status === 'hold'
@@ -141,7 +143,7 @@ const contactMessage = (o: Order) =>
 
 type Patch = { status?: OrderStatus; sent?: boolean }
 /** same as nextCode_ in Code.gs — for the demo only */
-const pickupCode = (name: string, n: number) => `${name.toLowerCase().split(/\s+/)[0].replace(/[^a-z0-9]/g, '').slice(0, 12) || 'pletok'}-${String(n).padStart(3, '0')}`
+const pickupCode = (_name: string, n: number) => `PLT-${String(n).padStart(3, '0')}`
 type Proof = { image: string; name: string; url: string }
 const STATUS_LABEL: Record<OrderStatus, string> = { hold: 'Hold', process: 'Process', done: 'Diambil', rejected: 'Ditolak' }
 const STATUS_TONE: Record<OrderStatus, string> = { hold: 'bg-[#e8b53a] text-brown', process: 'bg-leaf text-cream', done: 'bg-brown/10 text-brown/60', rejected: 'bg-terracotta/15 text-terracotta' }
@@ -192,7 +194,8 @@ function Orders({ orders, update, preorderOpen, loadProof }: { orders: Order[]; 
   const needle = q.trim().toLowerCase()
   const list = all
     .filter((o) => filter === 'all' || o.status === filter)
-    .filter((o) => !needle || `${o.code} ${o.ref} ${o.name} ${o.wa} ${o.sender}`.toLowerCase().includes(needle))
+    // just digits ("7", "007") → that pickup code, so the cashier types only the number
+    .filter((o) => !needle || (/^\d{1,4}$/.test(needle) ? Number(o.code.match(/(\d+)$/)?.[1]) === Number(needle) : `${o.code} ${o.ref} ${o.name} ${o.wa} ${o.sender}`.toLowerCase().includes(needle)))
     .sort((a, b) => rank[a.status] - rank[b.status] || a.at - b.at)
 
   return (
@@ -233,7 +236,7 @@ function Orders({ orders, update, preorderOpen, loadProof }: { orders: Order[]; 
         </div>
         <label className="flex min-w-48 flex-1 items-center gap-2 rounded-full bg-cream-deep/70 px-4 py-2.5">
           <Search className="size-4 text-brown/50" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari nama / kode / kode cek / nomor / pengirim" className="w-full bg-transparent font-cond outline-none" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari kode (007), nama, nomor…" className="w-full bg-transparent font-cond outline-none" />
         </label>
         <Btn onClick={() => downloadOrders(all)} icon={<Download className="size-4" />}>Unduh CSV</Btn>
       </div>
@@ -261,6 +264,7 @@ function Orders({ orders, update, preorderOpen, loadProof }: { orders: Order[]; 
                   <p className="font-cond text-sm italic text-brown/60">
                     {o.pay}
                     {o.ref && ` · kode cek ${o.ref}`}
+                    {!!o.promo && <b className="font-semibold not-italic text-leaf"> · promo −{rupiah(o.promo)}</b>}
                     {o.sender && ` · pengirim: ${o.sender}`}
                     {o.status === 'process' && (o.sent ? ' · kode sudah dikirim' : ' · kode BELUM dikirim')}
                   </p>
@@ -605,8 +609,8 @@ const downloadCsv = (rs: Response[]) =>
 const downloadOrders = (os: Order[]) =>
   saveCsv(
     'pletok-preorder',
-    ['Waktu', 'Kode', 'Kode cek', 'Nama', 'WhatsApp', 'Pesanan', 'Total (Rp)', 'Catatan', 'Status', 'Bayar via', 'Nama rekening pengirim', 'Kode terkirim'],
-    os.map((o) => [dayTime(o.at), o.code, o.ref, o.name, o.wa, o.summary, o.total * 1000, o.note, STATUS_LABEL[o.status], o.pay, o.sender, o.sent ? 'ya' : '']),
+    ['Waktu', 'Kode', 'Kode cek', 'Nama', 'WhatsApp', 'Pesanan', 'Total (Rp)', 'Catatan', 'Status', 'Bayar via', 'Nama rekening pengirim', 'Kode terkirim', 'Promo (Rp)'],
+    os.map((o) => [dayTime(o.at), o.code, o.ref, o.name, o.wa, o.summary, o.total * 1000, o.note, STATUS_LABEL[o.status], o.pay, o.sender, o.sent ? 'ya' : '', (o.promo ?? 0) * 1000]),
   )
 
 function demoResults(): Results {

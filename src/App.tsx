@@ -62,6 +62,20 @@ export default function App() {
     }
   }, [phase, remaining])
 
+  // A+G sent from /config: the booth screen plays it at the time the phone picked (a short delay so
+  // the screen has polled the Sheet by then). Shows older than ~20 s are never replayed on a reload.
+  const attnAt = menu.attnAt
+  const attnSeen = useRef(0)
+  useEffect(() => {
+    if (!desktop || !attnAt || attnAt <= attnSeen.current || attnAt < Date.now() - 20_000) return
+    attnSeen.current = attnAt
+    const t = window.setTimeout(() => setAttention(Date.now()), Math.max(0, attnAt - Date.now()))
+    return () => {
+      window.clearTimeout(t)
+      attnSeen.current = 0 // cancelled or rescheduled → let the new time through
+    }
+  }, [attnAt, desktop])
+
   useEffect(() => {
     const offGrand = signal.on('grand-opening', () => setGrand('manual'))
     const offIntro = signal.on('replay-intro', () => setIntro(true))

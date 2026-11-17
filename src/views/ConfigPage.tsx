@@ -1,12 +1,12 @@
 import { motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
-import { Ban, Check, DoorClosed, Landmark, Loader2, PackageCheck, RotateCcw, ShieldCheck, ShoppingBag, Trash2, UtensilsCrossed } from 'lucide-react'
+import { Ban, Check, DoorClosed, Gift, Megaphone, X, Landmark, Loader2, PackageCheck, RotateCcw, ShieldCheck, ShoppingBag, Trash2, UtensilsCrossed } from 'lucide-react'
 import { EVENT } from '../data/event'
 import { BUNDLES, DRINKS, type DrinkId } from '../data/menu'
 import { DEFAULT_CUTOFF, DEFAULT_PREORDER, PREORDER_ITEMS } from '../data/preorder'
-import { BACKEND, crewPin, savePreorderConfig, setFeedbackModeRemote, wipeData, type PreorderConfig, type WipeTarget } from '../lib/backend'
+import { BACKEND, crewPin, savePreorderConfig, setFeedbackModeRemote, wipeData, type PreorderConfig, type Promo, type WipeTarget } from '../lib/backend'
 import { usePreorder } from '../hooks/usePreorder'
-import { resetMenu, setBundleForced, setBundleItems, setClosedEarly, setDrinkSold, setMenuPrice, useMenu, useMenuSync } from '../hooks/useMenu'
+import { resetMenu, scheduleAttention, setBundleForced, setBundleItems, setClosedEarly, setDrinkSold, setMenuPrice, useMenu, useMenuSync } from '../hooks/useMenu'
 import { useEventPhase } from '../hooks/useEventPhase'
 import { useFeedbackOpen, type FeedbackMode } from '../hooks/useFeedbackOpen'
 import { spring } from '../lib/motion'
@@ -37,9 +37,11 @@ export function ConfigPage() {
       </header>
 
       <MenuAdmin />
+      <AttentionRemote />
       <AdminPanel demo={DEMO} save={(m) => (DEMO ? wait(1200).then(() => true) : setFeedbackModeRemote(pin, m))} />
       <PreorderAdmin
         remote={DEMO ? demoPreorder : preorder.config}
+        promoUsed={DEMO ? 6 : preorder.promoUsed}
         loaded={DEMO || preorder.loaded}
         save={async (c) => {
           if (!DEMO) return savePreorderConfig(pin, c)
@@ -327,12 +329,17 @@ const normPreorder = (c: PreorderConfig): PreorderConfig => ({
     }),
   ),
   bca: { number: (c.bca?.number ?? '').replace(/[^0-9 -]/g, '').slice(0, 30), holder: (c.bca?.holder ?? '').slice(0, 60) },
+  promo: normPromo(c.promo),
 })
+const normPromo = (p?: Promo): Promo => {
+  const mode = p?.mode === 'pct' ? 'pct' : 'rp'
+  return { on: !!p?.on, slots: Math.max(1, Math.min(200, Math.round(p?.slots || 10))), mode, value: Math.max(0, Math.min(mode === 'pct' ? 50 : 100, Math.round(p?.value || 0))) }
+}
 /** <input type="datetime-local"> speaks WIB regardless of the laptop's timezone */
 const toWib = (ms: number) => new Date(ms + 7 * 3_600_000).toISOString().slice(0, 16)
 const fromWib = (v: string) => new Date(`${v}:00+07:00`).getTime()
 
-function PreorderAdmin({ remote, loaded, save }: { remote: PreorderConfig; loaded: boolean; save: (c: PreorderConfig) => Promise<boolean> }) {
+function PreorderAdmin({ remote, loaded, save, promoUsed }: { remote: PreorderConfig; loaded: boolean; save: (c: PreorderConfig) => Promise<boolean>; promoUsed: number }) {
   // a pre-order price can be typed as a number or as "% off" today's menu price
   const menu = useMenu()
   const menuPrice = (id: string) => {
@@ -444,6 +451,8 @@ function PreorderAdmin({ remote, loaded, save }: { remote: PreorderConfig; loade
         />
       </div>
 
+      <PromoRow promo={normPromo(cfg.promo)} used={promoUsed} dirty={dirty((c) => c.promo)} loaded={loaded} onChange={(p) => edit((c) => ({ ...c, promo: p }))} />
+
       <div className={`mt-3 flex flex-wrap items-center gap-2 rounded-2xl bg-cream-deep/60 p-3 font-cond ${loaded ? '' : 'pointer-events-none opacity-50'}`}>
         <span className="font-display text-sm font-semibold">Semua item:</span>
         <span className="flex items-center">
@@ -458,18 +467,28 @@ function PreorderAdmin({ remote, loaded, save }: { remote: PreorderConfig; loade
         </button>
       </div>
 
-      <ul className={`mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 ${loaded ? '' : 'pointer-events-none opacity-50'}`}>
+      <ul className={`mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 ${loaded ? '' : 'pointer-events-none opacity-50'}`}>
         {PREORDER_ITEMS.map((it) => {
           const s = cfg.items[it.id] ?? { on: true, price: it.price }
           const syncing = dirty((c) => c.items[it.id])
           return (
-            <li key={it.id} className={`flex items-center gap-3 rounded-2xl border-2 p-3 transition-opacity ${s.on ? '' : 'opacity-55'}`} style={{ borderColor: syncing ? WAIT : 'rgb(90 46 26 / 0.08)' }}>
-              <span className="flex shrink-0 -space-x-3">
-                {it.images.map((src, i) => <img key={i} src={src} alt="" className="h-11 w-auto drop-shadow" />)}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-display text-sm font-semibold">{it.name}</span>
-                <span className="mt-1 flex items-center font-cond text-sm">
+            <li key={it.id} className={`flex min-w-0 flex-col gap-2.5 rounded-2xl border-2 p-3 transition-opacity ${s.on ? '' : 'opacity-55'}`} style={{ borderColor: syncing ? WAIT : 'rgb(90 46 26 / 0.08)' }}>
+              {/* top: picture · name + what it means · switch — same shape for a drink and a bundle */}
+              <div className="flex items-center gap-3">
+                <span className="flex h-11 w-20 shrink-0 items-center justify-center -space-x-4">
+                  {it.images.map((src, i) => <img key={i} src={src} alt="" className="h-11 w-auto drop-shadow" />)}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="line-clamp-2 font-display text-sm font-semibold leading-tight">{it.name}</span>
+                  <span className="block truncate font-cond text-xs italic text-brown/50">
+                    menu {menuPrice(it.id)}K{s.price < menuPrice(it.id) ? ` · hemat ${menuPrice(it.id) - s.price}K` : s.price > menuPrice(it.id) ? ' · lebih mahal dari menu!' : ' · sama dengan menu'}
+                  </span>
+                </span>
+                <Switch on={s.on} pending={syncing} onClick={() => setItem(it.id, { on: !s.on })} label={`Jual ${it.name}`} />
+              </div>
+              {/* bottom: the price as a number or as % off — each half stays on one line */}
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 pl-1 font-cond text-sm">
+                <span className="flex items-center whitespace-nowrap">
                   Rp
                   <input
                     type="number"
@@ -479,10 +498,12 @@ function PreorderAdmin({ remote, loaded, save }: { remote: PreorderConfig; loade
                     value={s.price || ''}
                     onChange={(e) => setItem(it.id, { price: Math.min(500, Math.max(0, Math.round(Number(e.target.value)))) })}
                     aria-label={`Harga ${it.name} (ribu)`}
-                    className="mx-1 w-12 rounded-lg bg-cream-deep/70 px-1.5 py-0.5 text-right font-display font-semibold tabular-nums outline-none focus:ring-2 focus:ring-terracotta"
+                    className="mx-1 w-14 rounded-lg bg-cream-deep/70 px-2 py-1 text-right font-display font-semibold tabular-nums outline-none focus:ring-2 focus:ring-terracotta"
                   />
                   .000
-                  <span className="ml-2 text-brown/40">atau</span>
+                </span>
+                <span className="text-brown/40">atau</span>
+                <span className="flex items-center whitespace-nowrap">
                   <input
                     type="number"
                     inputMode="numeric"
@@ -491,15 +512,11 @@ function PreorderAdmin({ remote, loaded, save }: { remote: PreorderConfig; loade
                     value={s.price ? Math.max(0, offPct(it.id, s.price)) : ''}
                     onChange={(e) => setItem(it.id, { price: fromPct(it.id, Number(e.target.value)) })}
                     aria-label={`Diskon ${it.name} (persen)`}
-                    className="mx-1 w-10 rounded-lg bg-cream-deep/70 px-1.5 py-0.5 text-right font-display font-semibold tabular-nums outline-none focus:ring-2 focus:ring-terracotta"
+                    className="mr-1 w-12 rounded-lg bg-cream-deep/70 px-2 py-1 text-right font-display font-semibold tabular-nums outline-none focus:ring-2 focus:ring-terracotta"
                   />
                   % off
                 </span>
-                <span className="block font-cond text-xs italic text-brown/45">
-                  menu {menuPrice(it.id)}K{s.price < menuPrice(it.id) ? ` · hemat ${menuPrice(it.id) - s.price}K` : s.price > menuPrice(it.id) ? ' · lebih mahal dari menu!' : ' · sama dengan menu'}
-                </span>
-              </span>
-              <Switch on={s.on} pending={syncing} onClick={() => setItem(it.id, { on: !s.on })} label={`Jual ${it.name}`} />
+              </div>
             </li>
           )
         })}
@@ -508,6 +525,97 @@ function PreorderAdmin({ remote, loaded, save }: { remote: PreorderConfig; loade
   )
 }
 
+
+/* ------------------------------------------------------------------ A+G from a phone */
+
+const ATTN_DELAYS = [15, 30, 60]
+
+/** the booth screen's attention show, started from here — a delay so the screen has the order in time */
+function AttentionRemote() {
+  const { attnAt } = useMenu()
+  const sync = useMenuSync()
+  const [delay, setDelay] = useState(15)
+  const [now, setNow] = useState(Date.now)
+  const waiting = !!attnAt && attnAt > now
+  // tick through the countdown and the 10 s "now playing" note after it
+  const ticking = !!attnAt && now < attnAt + 10_000
+  useEffect(() => {
+    if (!ticking) return
+    const t = window.setInterval(() => setNow(Date.now()), 250)
+    return () => window.clearInterval(t)
+  }, [ticking])
+  const left = attnAt ? Math.ceil((attnAt - now) / 1000) : 0
+  const justPlayed = !!attnAt && !waiting && now - attnAt < 10_000
+  return (
+    <Card title={<span className="flex items-center gap-2"><Megaphone className="size-5 text-terracotta" /> Attention show (A+G)</span>} meta="diputar di layar booth">
+      <p className="font-display text-sm text-brown-soft">Show 7 detik yang rame buat narik orang ke meja — sama seperti A+G di laptop booth. Ada jeda dulu supaya layar booth sempat menerima perintahnya (layar cek tiap ±10 detik).</p>
+      {waiting ? (
+        <div className="mt-3 flex items-center gap-3 rounded-2xl p-4" style={{ background: sync.pending ? `${WAIT}33` : 'rgb(94 123 58 / 0.12)' }}>
+          {sync.pending ? <Loader2 className="size-5 animate-spin text-brown" /> : <Megaphone className="size-5 text-leaf" />}
+          <span className="flex-1 font-display font-semibold">
+            {sync.pending ? 'Mengirim ke Sheet…' : 'Terkirim'} · mulai dalam <span className="tabular-nums">{left}</span> dtk
+          </span>
+          <button type="button" onClick={() => scheduleAttention(null)} className="flex items-center gap-1 rounded-full border-2 border-brown/15 px-3 py-1.5 font-display text-sm font-semibold">
+            <X className="size-4" /> Batal
+          </button>
+        </div>
+      ) : (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="font-cond italic text-brown-soft">Jeda</span>
+          {ATTN_DELAYS.map((d) => (
+            <button key={d} type="button" onClick={() => setDelay(d)} className={`rounded-full px-3 py-1.5 font-display text-sm font-semibold ${delay === d ? 'bg-brown text-cream' : 'border-2 border-brown/15'}`}>
+              {d} dtk
+            </button>
+          ))}
+          <motion.button type="button" whileTap={{ scale: 0.96 }} onClick={() => (scheduleAttention(delay * 1000), setNow(Date.now()))} className="ml-auto flex items-center gap-2 rounded-full bg-terracotta px-5 py-2.5 font-display font-semibold text-cream shadow-[0_4px_0_#6e3418]">
+            <Megaphone className="size-4" /> Putar
+          </motion.button>
+        </div>
+      )}
+      {justPlayed && <p className="mt-2 font-cond text-sm italic text-leaf">Lagi diputar di layar booth 🎉</p>}
+      {sync.failed && <p className="mt-2 font-cond text-sm italic text-terracotta">Gagal terkirim — cek sinyal, lalu coba lagi.</p>}
+    </Card>
+  )
+}
+
+/* ------------------------------------------------------------------ first-N promo */
+
+/** "Promo N pemesan pertama": the Sheet hands out the slots in order, one per WhatsApp number */
+function PromoRow({ promo, used, dirty, loaded, onChange }: { promo: Promo; used: number; dirty: boolean; loaded: boolean; onChange: (p: Promo) => void }) {
+  const set = (p: Partial<Promo>) => onChange({ ...promo, ...p })
+  const num = 'w-16 rounded-lg bg-cream px-2 py-1.5 text-right font-display font-semibold tabular-nums outline-none focus:ring-2 focus:ring-terracotta'
+  // worst case, so the team knows what the promo can cost
+  const most = promo.mode === 'rp' ? `maks Rp${(promo.slots * promo.value * 1000).toLocaleString('id-ID')} total` : `${promo.value}% × ${promo.slots} pesanan`
+  return (
+    <div className={`mt-3 rounded-2xl bg-cream-deep/60 p-4 ${loaded ? '' : 'pointer-events-none opacity-50'}`} style={dirty ? { boxShadow: `inset 0 0 0 2px ${WAIT}` } : undefined}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="min-w-0">
+          <span className="flex items-center gap-1.5 font-display font-semibold"><Gift className="size-4 text-terracotta" /> Promo pemesan pertama</span>
+          <span className="font-cond text-sm italic text-brown/60">{promo.on ? `${Math.min(used, promo.slots)}/${promo.slots} slot terpakai · ${most}` : 'mati'}</span>
+        </span>
+        <Switch on={promo.on} pending={dirty} onClick={() => set({ on: !promo.on })} label="Promo pemesan pertama" />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 font-cond">
+        <label className="flex items-center gap-1.5">
+          <input type="number" inputMode="numeric" min={1} max={200} value={promo.slots} onChange={(e) => set({ slots: Number(e.target.value) || 1 })} aria-label="Jumlah slot promo" className={num} /> orang pertama
+        </label>
+        <span className="flex items-center gap-1.5">
+          potongan
+          <input type="number" inputMode="numeric" min={0} max={promo.mode === 'pct' ? 50 : 100} value={promo.value} onChange={(e) => set({ value: Number(e.target.value) || 0 })} aria-label="Besar potongan" className={num} />
+          <span className="flex rounded-full bg-cream p-0.5 font-display text-sm font-semibold">
+            {(['rp', 'pct'] as const).map((m) => (
+              <button key={m} type="button" onClick={() => set({ mode: m, value: m === 'pct' ? Math.min(promo.value, 50) : promo.value })} className={`rounded-full px-2.5 py-1 ${promo.mode === m ? 'bg-brown text-cream' : 'text-brown/60'}`}>
+                {m === 'rp' ? 'rb' : '%'}
+              </button>
+            ))}
+          </span>
+          / pesanan
+        </span>
+      </div>
+      <p className="mt-2 font-cond text-sm italic text-brown/55">1× per nomor WA · pesanan ditolak mengembalikan slotnya · yang dapat ditentukan Sheet waktu pesanan masuk, jadi slot nggak bisa kelebihan.</p>
+    </div>
+  )
+}
 
 /* ------------------------------------------------------------------ clean up test data */
 

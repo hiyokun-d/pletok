@@ -49,7 +49,7 @@ export function ErrorPage({ kind, onRetry }: { kind: ErrorKind; onRetry?: () => 
           <motion.img
             src={cupOriginal}
             alt=""
-            className="absolute bottom-4 left-[18%] h-36 w-auto drop-shadow-[0_10px_10px_rgb(90_46_26/0.25)]"
+            className="absolute bottom-4 left-[18%] h-[min(9rem,32vw)] w-auto drop-shadow-[0_10px_10px_rgb(90_46_26/0.25)]"
             // tips over its own bottom-right edge, so it lands on the "table" instead of through it
             style={{ originX: 1, originY: 1 }}
             initial={{ rotate: 0 }}

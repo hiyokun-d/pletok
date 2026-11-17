@@ -6,6 +6,7 @@ import { DRINKS, TAGLINE } from '../data/menu'
 import { logScan } from '../lib/backend'
 import { useFeedbackOpen } from '../hooks/useFeedbackOpen'
 import { usePreorder } from '../hooks/usePreorder'
+import { PromoBanner } from '../components/OrderTracker'
 import { InstagramIcon } from '../components/InstagramIcon'
 import { WindLeaves } from '../components/WindLeaves'
 import logo from '../assets/logo.png'
@@ -21,7 +22,8 @@ const ICONS = { preorder: ShoppingBag, feedback: MessageCircleHeart, instagram: 
  */
 export function LinksPage() {
   const feedback = useFeedbackOpen().open
-  const preorder = usePreorder().open
+  const { open: preorder, config: poConfig, promoLeft } = usePreorder()
+  const promoLive = preorder && !!poConfig.promo?.on && promoLeft > 0
   const links = [
     // pre-order sits on top while it's open (from the day an admin switches it on until H-1)
     ...(preorder ? [{ kind: 'preorder' as const, label: 'Pre-order Pletok', sub: 'Pesan sekarang, ambil di booth — tanpa antre', href: '/preorder' }] : []),
@@ -44,6 +46,12 @@ export function LinksPage() {
         <p className="mt-1 flex items-center gap-1.5 font-cond text-base italic text-brown-soft">
           <MapPin className="size-4" /> {EVENT.table} · {EVENT.place}, {EVENT.campus}
         </p>
+
+        {promoLive && poConfig.promo && (
+          <motion.div className="mt-6 w-full" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring.snappy, delay: 0.1 }}>
+            <PromoBanner promo={poConfig.promo} left={promoLeft} href="/preorder" />
+          </motion.div>
+        )}
 
         <div className="mt-7 flex w-full flex-col gap-3">
           {links.map((l, i) => {

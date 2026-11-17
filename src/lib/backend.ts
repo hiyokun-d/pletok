@@ -78,6 +78,8 @@ export interface RemoteStats {
   /** set from /hasil only; 'auto' = follow the schedule */
   feedbackMode?: 'auto' | 'open' | 'closed'
   preorder?: PreorderConfig
+  /** first-N promo slots already taken */
+  promoUsed?: number
 }
 
 export async function fetchStats(): Promise<RemoteStats | null> {
@@ -163,7 +165,18 @@ export interface PreorderConfig {
   items: Record<string, { on: boolean; price: number }>
   /** where customers transfer to — set on /config */
   bca?: { number: string; holder: string }
+  /** "first N orders" discount — the Sheet decides who gets it when the order is written */
+  promo?: Promo
 }
+export interface Promo {
+  on: boolean
+  slots: number
+  /** rp = flat thousands off each order · pct = percent of the order */
+  mode: 'rp' | 'pct'
+  value: number
+}
+/** the discount (thousands) an order of `total` would get — same rule as promoFor_ in Code.gs */
+export const promoOff = (p: Promo | undefined, total: number) => (!p?.on || !p.value || !total ? 0 : Math.max(0, Math.min(p.mode === 'pct' ? Math.round((total * p.value) / 100) : p.value, total - 1)))
 /** hold = waiting for an admin to find the transfer · process = verified, has its pickup code */
 export type OrderStatus = 'hold' | 'process' | 'done' | 'rejected'
 export interface Order {
@@ -187,6 +200,8 @@ export interface Order {
   ref: string
   /** Drive link of the transfer screenshot ('' = none yet) */
   proof: string
+  /** first-N promo discount (thousands), already taken off `total` */
+  promo?: number
 }
 /** what a customer's phone gets back about its own order */
 export interface PublicOrder {
@@ -201,6 +216,8 @@ export interface PublicOrder {
   lines: Array<{ id: string; name: string; qty: number; price: number }>
   /** a transfer screenshot is uploaded */
   proof: boolean
+  /** first-N promo discount (thousands), already taken off `total` */
+  promo?: number
 }
 
 /** a POST whose answer we need (the order code) — retried a few times on a flaky connection */
@@ -218,7 +235,7 @@ async function postJson<T>(p: Payload, tries = 3): Promise<(T & { ok: boolean; e
 }
 
 export function submitPreorder(order: { id: string; items: Array<{ id: string; qty: number }>; name: string; wa: string; note: string; hp: string }) {
-  return postJson<{ status: OrderStatus; total: number; ref: string }>({ type: 'preorder', ...order })
+  return postJson<{ status: OrderStatus; total: number; ref: string; promo?: number }>({ type: 'preorder', ...order })
 }
 
 /** the customer's own orders, by their private ids — the code only comes back once verified */
@@ -304,13 +321,32 @@ async function pollOnce() {
   lastStats = s
   statSubs.forEach((f) => f(s))
 }
+// something live on screen (the promo slots counting down) asks for quicker checks; the Sheet
+// answers from a 10 s cache, so this costs a fetch, not a Sheet read
+let fast = 0
+export function fastStats() {
+  fast++
+  return () => void fast--
+}
+const every = () => (fast > 0 ? 8_000 : window.matchMedia('(pointer: fine)').matches ? 10_000 : 30_000)
+let lastPoll = 0
+function loop() {
+  window.setTimeout(() => {
+    if (Date.now() - lastPoll >= every() - 500) {
+      lastPoll = Date.now()
+      void pollOnce()
+    }
+    loop()
+  }, 2_000)
+}
 export function onStats(fn: (s: RemoteStats) => void) {
   statSubs.add(fn)
   if (lastStats) fn(lastStats)
   if (BACKEND && !polling) {
     polling = true
+    lastPoll = Date.now()
     void pollOnce()
-    window.setInterval(pollOnce, window.matchMedia('(pointer: fine)').matches ? 10_000 : 30_000)
+    loop()
     document.addEventListener('visibilitychange', () => void pollOnce())
   }
   return () => {

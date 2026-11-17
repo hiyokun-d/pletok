@@ -7,7 +7,7 @@
  *   POST {type:'menu', pin, state} → saves the sold-out state (crew PIN only)
  *   POST {type:'preorder', ...}  → a row in "Preorder", on hold (no pickup code yet) + a kode cek
  *   POST {type:'preorder-lookup', ids} / {type:'preorder-find', ref | wa+name} → the customer's own orders
- *   POST {type:'preorder-status', pin, id, status?, sent?} → verify (hands out e.g. elisha-007), picked up, rejected
+ *   POST {type:'preorder-status', pin, id, status?, sent?} → verify (hands out PLT-001, PLT-002…), picked up, rejected
  *   POST {type:'preorder-proof', id, image} → the transfer screenshot into Drive, named after the customer
  *   POST {type:'preorder-proof-get', pin, id} → that screenshot, for /hasil
  *   POST {type:'wipe', pin, what:['orders','feedback','scans','proofs']} → clear test data (backs up first)
@@ -22,7 +22,7 @@ const SCAN_COLS = ['Waktu', 'Tujuan', 'Perangkat']
 const DRINK_NAMES = { original: 'Original', lychee: 'Lychee Sparkling', yakult: 'Yakult' }
 
 /* ---- pre-order: the Sheet is the source of truth for what's on sale and what it costs */
-const ORDER_COLS = ['Waktu', 'Kode', 'ID', 'Nama', 'WhatsApp', 'Pesanan', 'Total (Rp)', 'Catatan', 'Status', 'Detail (JSON)', 'Bayar via', 'Nama rekening pengirim', 'Kode terkirim', 'Kode cek', 'Bukti transfer']
+const ORDER_COLS = ['Waktu', 'Kode', 'ID', 'Nama', 'WhatsApp', 'Pesanan', 'Total (Rp)', 'Catatan', 'Status', 'Detail (JSON)', 'Bayar via', 'Nama rekening pengirim', 'Kode terkirim', 'Kode cek', 'Bukti transfer', 'Promo (Rp)']
 // an order waits ("hold") until an admin finds the transfer, then gets its pickup code ("process").
 // The Status column keeps words a person reading the Sheet understands.
 const STATUS = { hold: 'menunggu verifikasi', process: 'diproses', done: 'selesai', rejected: 'ditolak' }
@@ -59,15 +59,12 @@ const loose_ = (t) => String(t).toLowerCase().replace(/[^a-z0-9]/g, '')
 // what the customer's phone may know about an order: the pickup code only once it's paid
 function orderPublic_(r) {
   const st = statusOf_(r[8])
-  return { id: String(r[2]), ref: String(r[13] || ''), status: st, code: st === 'process' || st === 'done' ? String(r[1]) : '', total: Number(r[6]) / 1000, name: String(r[3]), at: new Date(r[0]).getTime(), lines: JSON.parse(String(r[9]) || '[]'), proof: !!r[14] }
+  return { id: String(r[2]), ref: String(r[13] || ''), status: st, code: st === 'process' || st === 'done' ? String(r[1]) : '', total: Number(r[6]) / 1000, name: String(r[3]), at: new Date(r[0]).getTime(), lines: JSON.parse(String(r[9]) || '[]'), proof: !!r[14], promo: Number(r[15]) / 1000 || 0 }
 }
-// next pickup code: the customer's first name + a running number, lowercase — "elisha-007".
-// The number counts every code ever given (old PLT-xxx too), so it never repeats.
-const nextCode_ = (rows, name) => {
-  const n = rows.reduce((m, r) => Math.max(m, Number((String(r[1]).match(/(\d+)$/) || [])[1]) || 0), 0) + 1
-  const first = String(name).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/\s+/)[0].replace(/[^a-z0-9]/g, '').slice(0, 12) || 'pletok'
-  return first + '-' + ('00' + n).slice(-3)
-}
+// next pickup code: PLT- + a running number, so the cashier only types the digits ("007").
+// It counts every code ever given (older "nama-003" style too), so it never repeats. Being easy to
+// guess, it never unlocks an order lookup — that's the kode cek's job.
+const nextCode_ = (rows) => 'PLT-' + ('00' + (rows.reduce((m, r) => Math.max(m, Number((String(r[1]).match(/(\d+)$/) || [])[1]) || 0), 0) + 1)).slice(-3)
 
 /* ---- proof of transfer: screenshots go into one Drive folder, renamed after the customer */
 function proofFolder_() {
@@ -111,7 +108,24 @@ function preorderConfig_() {
     items[id] = { on: s.on !== false, price: Number(s.price) > 0 ? Number(s.price) : PREORDER_ITEMS[id].price }
   })
   const bca = saved.bca || {}
-  return { enabled: !!saved.enabled, cutoff: Math.min(Number(saved.cutoff) || PREORDER_CUTOFF, PREORDER_CUTOFF), items: items, bca: { number: String(bca.number || ''), holder: String(bca.holder || '') } }
+  return { enabled: !!saved.enabled, cutoff: Math.min(Number(saved.cutoff) || PREORDER_CUTOFF, PREORDER_CUTOFF), items: items, bca: { number: String(bca.number || ''), holder: String(bca.holder || '') }, promo: promoOf_(saved.promo) }
+}
+
+/* ---- "first N orders" promo: the Sheet decides at the moment the order is written, so a stale
+   screen can never give away more than the slots. One per WhatsApp number; a rejected order frees its slot. */
+function promoOf_(p) {
+  p = p || {}
+  return { on: !!p.on, slots: Math.max(1, Math.min(200, Math.round(Number(p.slots) || 10))), mode: p.mode === 'pct' ? 'pct' : 'rp', value: Math.max(0, Math.min(p.mode === 'pct' ? 50 : 100, Math.round(Number(p.value) || 0))) }
+}
+const promoTaken_ = (rows) => rows.filter((r) => Number(r[15]) > 0 && statusOf_(r[8]) !== 'rejected')
+/** discount in thousands for an order of `total` (thousands); 0 when off, full, or this number already had one */
+function promoFor_(promo, rows, total, wa) {
+  if (!promo.on || !promo.value) return 0
+  const taken = promoTaken_(rows)
+  if (taken.length >= promo.slots) return 0
+  if (taken.some((r) => digits_(r[4]) === digits_(wa))) return 0
+  const off = promo.mode === 'pct' ? Math.round((total * promo.value) / 100) : promo.value
+  return Math.max(0, Math.min(off, total - 1))
 }
 
 
@@ -198,11 +212,15 @@ function doPost(e) {
       // a retry of the same order gets the first one back instead of a duplicate
       const rows = orderRows_(sh)
       const prev = rows.filter((r) => r[2] === b.id)[0]
-      if (prev) return json_({ ok: true, status: statusOf_(prev[8]), total: Number(prev[6]) / 1000, ref: String(prev[13] || '') })
+      if (prev) return json_({ ok: true, status: statusOf_(prev[8]), total: Number(prev[6]) / 1000, ref: String(prev[13] || ''), promo: Number(prev[15]) / 1000 || 0 })
+      // first-N promo, decided here (under the lock) — the total below is what they transfer
+      const promo = promoFor_(cfg.promo, rows, total, wa)
+      const pay = total - promo
       // no pickup code yet: it waits on hold until an admin finds the transfer
       const ref = newRef_(rows)
-      sh.appendRow([now, '', clip_(b.id, 64), name, "'" + wa, lines.map((l) => l.qty + '× ' + l.name).join(', '), total * 1000, clip_(b.note, 300), STATUS.hold, JSON.stringify(lines), 'BCA', clip_(b.sender, 80), '', ref])
-      return json_({ ok: true, status: 'hold', total: total, ref: ref })
+      sh.appendRow([now, '', clip_(b.id, 64), name, "'" + wa, lines.map((l) => l.qty + '× ' + l.name).join(', '), pay * 1000, clip_(b.note, 300), STATUS.hold, JSON.stringify(lines), 'BCA', clip_(b.sender, 80), '', ref, '', promo * 1000])
+      if (promo) CacheService.getScriptCache().remove('stats') // slots left changes for everyone
+      return json_({ ok: true, status: 'hold', total: pay, ref: ref, promo: promo })
     }
 
     // the customer's phone asks how its orders are doing — by the private order id only;
@@ -213,13 +231,13 @@ function doPost(e) {
       return json_({ ok: true, orders: rows.map(orderPublic_) })
     }
 
-    // "Cek pesanan" from any phone: the kode cek or the pickup code alone, or WhatsApp number + name together
+    // "Cek pesanan" from any phone: the kode cek alone, or WhatsApp number + name together
     if (b.type === 'preorder-find') {
       const rows = orderRows_(orderSheet_())
       const typed = String(b.ref || '').trim()
       const ref = typed.toUpperCase().replace(/[^A-Z0-9]/g, '')
       let hits = []
-      if (typed) hits = rows.filter((r) => String(r[13]) === ref || (String(r[1]) && String(r[1]).toLowerCase() === typed.toLowerCase()))
+      if (typed) hits = rows.filter((r) => String(r[13]) === ref)
       else {
         const wa = digits_(b.wa || '')
         const name = loose_(b.name || '')
@@ -239,7 +257,7 @@ function doPost(e) {
         items[id] = { on: s.on !== false, price: Math.max(1, Math.min(500, Math.round(Number(s.price) || PREORDER_ITEMS[id].price))) }
       })
       const bca = c.bca || {}
-      props.setProperty('PREORDER', JSON.stringify({ enabled: !!c.enabled, cutoff: Math.min(Number(c.cutoff) || PREORDER_CUTOFF, PREORDER_CUTOFF), items: items, bca: { number: clip_(bca.number, 30).replace(/[^0-9 -]/g, ''), holder: clip_(bca.holder, 60) } }))
+      props.setProperty('PREORDER', JSON.stringify({ enabled: !!c.enabled, cutoff: Math.min(Number(c.cutoff) || PREORDER_CUTOFF, PREORDER_CUTOFF), items: items, bca: { number: clip_(bca.number, 30).replace(/[^0-9 -]/g, ''), holder: clip_(bca.holder, 60) }, promo: promoOf_(c.promo) }))
       CacheService.getScriptCache().remove('stats')
       return json_({ ok: true })
     }
@@ -247,6 +265,7 @@ function doPost(e) {
     // admin (/hasil): verify (hold → process, hands out the pickup code), picked up, rejected,
     // and "code sent on WhatsApp" — the order is found by its id
     if (b.type === 'preorder-status') {
+      CacheService.getScriptCache().remove('stats') // a rejected promo order frees its slot
       if (!b.pin || b.pin !== props.getProperty('CREW_PIN')) return json_({ ok: false, error: 'pin' })
       const sh = orderSheet_()
       const rows = orderRows_(sh)
@@ -256,7 +275,7 @@ function doPost(e) {
       if (b.status) {
         if (!STATUS[b.status]) return json_({ ok: false, error: 'status' })
         if ((b.status === 'process' || b.status === 'done') && !code) {
-          code = nextCode_(rows, rows[i][3])
+          code = nextCode_(rows)
           sh.getRange(i + 2, 2).setValue(code)
         }
         sh.getRange(i + 2, 9).setValue(STATUS[b.status])
@@ -356,7 +375,7 @@ function doPost(e) {
         orders: orderRows_(orderSheet_()).map((r) => ({
           at: new Date(r[0]).getTime(), code: String(r[1]), id: String(r[2]), name: String(r[3]), wa: String(r[4]), summary: String(r[5]),
           total: Number(r[6]) / 1000, note: String(r[7]), status: statusOf_(r[8]), lines: JSON.parse(String(r[9]) || '[]'),
-          pay: String(r[10] || 'BCA'), sender: String(r[11] || ''), sent: r[12] === 'ya', ref: String(r[13] || ''), proof: String(r[14] || ''),
+          pay: String(r[10] || 'BCA'), sender: String(r[11] || ''), sent: r[12] === 'ya', ref: String(r[13] || ''), proof: String(r[14] || ''), promo: Number(r[15]) / 1000 || 0,
         })),
       })
     }
@@ -404,6 +423,8 @@ function doGet() {
     menu: menu ? JSON.parse(menu) : null,
     feedbackMode: PropertiesService.getScriptProperties().getProperty('FEEDBACK_MODE') || 'auto',
     preorder: preorderConfig_(),
+    // slots of the first-N promo still free (live: every promo order clears this cache)
+    promoUsed: promoTaken_(orderRows_(orderSheet_())).length,
   })
   cache.put('stats', out, 10)
   return ContentService.createTextOutput(out).setMimeType(ContentService.MimeType.JSON)

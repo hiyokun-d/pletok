@@ -1,11 +1,12 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
-import { ArrowLeft, Ban, Check, CheckCircle2, ChevronDown, Copy, Hourglass, ImageUp, KeyRound, Landmark, Loader2, MapPin, MessageCircle, Phone, QrCode, RefreshCw, Search, ShieldAlert, XCircle } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Ban, Check, Gift, CheckCircle2, ChevronDown, Copy, Hourglass, ImageUp, KeyRound, Landmark, Loader2, MapPin, MessageCircle, Phone, QrCode, RefreshCw, Search, ShieldAlert, XCircle } from 'lucide-react'
 import { ADMIN_NAME, ADMIN_WA, EVENT } from '../data/event'
 import { rupiah } from '../data/preorder'
-import { findOrders, lookupOrders, uploadProof, type OrderStatus, type PreorderConfig, type PublicOrder } from '../lib/backend'
+import { findOrders, lookupOrders, uploadProof, type OrderStatus, type PreorderConfig, type Promo, type PublicOrder } from '../lib/backend'
 import { spring } from '../lib/motion'
 import { ParticleField } from './ParticleField'
+import { Morph } from './Morph'
 
 /* ------------------------------------------------------------------ the phone's own orders */
 
@@ -23,6 +24,10 @@ export interface MyOrder {
   ref?: string
   /** a transfer screenshot went up */
   proof?: boolean
+  /** first-N promo discount (thousands) the Sheet gave, already off `total` */
+  promo?: number
+  /** the screen promised a promo slot but they were all gone by the time the order landed */
+  promoMissed?: boolean
 }
 
 const KEY = 'pletok:orders'
@@ -57,7 +62,7 @@ export function useMyOrders() {
       const next = [...os]
       found.forEach((f) => {
         const i = next.findIndex((o) => o.id === f.id)
-        const o: MyOrder = { ...(i >= 0 ? next[i] : { saved: 0 }), id: f.id, at: f.at, name: f.name, total: f.total, lines: f.lines, status: f.status, code: f.code, ref: f.ref, proof: f.proof }
+        const o: MyOrder = { ...(i >= 0 ? next[i] : { saved: 0 }), id: f.id, at: f.at, name: f.name, total: f.total, lines: f.lines, status: f.status, code: f.code, ref: f.ref, proof: f.proof, promo: f.promo }
         if (i >= 0) next[i] = o
         else next.push(o)
       })
@@ -85,7 +90,7 @@ export function useMyOrders() {
       const next = os.flatMap((o) => {
         const u = r.find((x) => x.id === o.id)
         if (!u) return ids.includes(o.id) ? [] : [o]
-        return [{ ...o, status: u.status, code: u.code || o.code, ref: u.ref || o.ref, proof: u.proof || o.proof }]
+        return [{ ...o, status: u.status, code: u.code || o.code, ref: u.ref || o.ref, proof: u.proof || o.proof, promo: u.promo ?? o.promo }]
       })
       store(next)
       return next
@@ -225,7 +230,7 @@ export function MyOrdersList({ orders, onOpen }: { orders: MyOrder[]; onOpen: (i
 
 /**
  * "Cek pesanan" from any phone — a small button until it's needed, so the menu stays the first
- * thing people see. One box takes the kode cek (K7Q2MX) or the pickup code (elisha-007);
+ * thing people see. The kode cek (K7Q2MX) alone — never the pickup code, PLT-001 is easy to guess —
  * without either, WhatsApp number + name must both match.
  */
 export function FindOrder({ onFound, onOpen, notice }: { onFound: (os: PublicOrder[]) => void; onOpen: (id: string) => void; notice?: string }) {
@@ -281,7 +286,7 @@ export function FindOrder({ onFound, onOpen, notice }: { onFound: (os: PublicOrd
             transition={spring.snappy}
           >
             <div className="flex gap-1 rounded-full bg-cream-deep/70 p-1">
-              {([['ref', 'Pakai kode', KeyRound], ['wa', 'Pakai nomor WA', Phone]] as const).map(([m, label, Icon]) => (
+              {([['ref', 'Pakai kode cek', KeyRound], ['wa', 'Pakai nomor WA', Phone]] as const).map(([m, label, Icon]) => (
                 <button key={m} type="button" onClick={() => (setMode(m), setState('idle'))} className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-full py-2 font-display text-sm font-semibold ${mode === m ? 'text-cream' : 'text-brown/70'}`}>
                   {mode === m && <motion.span layoutId="find-mode" className="absolute inset-0 rounded-full bg-brown" transition={spring.snappy} />}
                   <Icon className="relative size-4" /> <span className="relative">{label}</span>
@@ -291,7 +296,7 @@ export function FindOrder({ onFound, onOpen, notice }: { onFound: (os: PublicOrd
             <AnimatePresence mode="popLayout" initial={false}>
               {mode === 'ref' ? (
                 <motion.div key="ref" initial={{ opacity: 0, filter: 'blur(4px)' }} animate={{ opacity: 1, filter: 'blur(0px)' }} exit={{ opacity: 0, filter: 'blur(4px)' }}>
-                  <input value={ref} onChange={(e) => setRef(e.target.value)} maxLength={20} placeholder="Kode cek atau kode ambil" autoCapitalize="none" autoComplete="off" spellCheck={false} className={input} />
+                  <input value={ref} onChange={(e) => setRef(e.target.value)} maxLength={8} placeholder="Kode cek, misal K7Q2MX" autoCapitalize="characters" autoComplete="off" spellCheck={false} className={input} />
                 </motion.div>
               ) : (
                 <motion.div key="wa" className="flex flex-col gap-2" initial={{ opacity: 0, filter: 'blur(4px)' }} animate={{ opacity: 1, filter: 'blur(0px)' }} exit={{ opacity: 0, filter: 'blur(4px)' }}>
@@ -373,6 +378,65 @@ function ProofUpload({ order, onDone }: { order: MyOrder; onDone: () => void }) 
         {state === 'busy' ? <Loader2 className="size-5 animate-spin" /> : sent ? <CheckCircle2 className="size-6 text-leaf" /> : null}
       </motion.button>
     </div>
+  )
+}
+
+/**
+ * "Promo N pemesan pertama" — slots fill up as dots. The count on screen can be ~30 s old;
+ * that's fine, the Sheet decides when the order is written and the payment screen shows the result.
+ */
+export function PromoBanner({ promo, left, href, loud = false, className = '' }: { promo: Promo; left: number; href?: string; loud?: boolean; className?: string }) {
+  const used = promo.slots - left
+  const off = promo.mode === 'pct' ? `${promo.value}%` : rupiah(promo.value)
+  const gone = left <= 0
+  // on the landing page / link page it's a way in: tap → /preorder
+  const Box = href ? motion.a : motion.div
+  return (
+    <Box
+      layout
+      {...(href ? { href, 'data-track': 'promo-banner', whileTap: { scale: 0.97 } } : {})}
+      className={`relative block overflow-hidden rounded-3xl p-4 text-left ${gone ? 'border-2 border-dashed border-brown/15' : 'bg-leaf text-cream shadow-[0_6px_0_#3f5426]'} ${className}`}
+      // loud (top of the landing page): breathes a little so the eye lands on it
+      {...(loud && !gone ? { animate: { scale: [1, 1.025, 1] }, transition: { duration: 2.4, repeat: Infinity, ease: 'easeInOut' } } : {})}
+    >
+      {loud && !gone && (
+        // a shine that sweeps across every few seconds
+        <motion.span
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 -left-1/3 w-1/3 skew-x-[-20deg] bg-gradient-to-r from-transparent via-cream/35 to-transparent"
+          animate={{ x: ['0%', '450%'] }}
+          transition={{ duration: 1.1, repeat: Infinity, repeatDelay: 2.4, ease: 'easeInOut' }}
+        />
+      )}
+      <div className="relative flex items-center gap-3">
+        <motion.span className="shrink-0" {...(loud && !gone ? { animate: { rotate: [0, -14, 12, -8, 0] }, transition: { duration: 0.9, repeat: Infinity, repeatDelay: 2.6 } } : {})}>
+          <Gift className={`size-7 ${gone ? 'text-brown/40' : ''}`} />
+        </motion.span>
+        <div className="min-w-0 flex-1">
+          {loud && !gone && <span className="mb-1 inline-block rounded-full bg-[#e8b53a] px-2 py-0.5 font-display text-[0.65rem] font-bold uppercase tracking-wider text-brown">Terbatas · cepetan!</span>}
+          <p className="font-display font-bold leading-tight">{gone ? `Promo ${promo.slots} pemesan pertama sudah habis` : `Promo ${promo.slots} pemesan pertama: potongan ${off}!`}</p>
+          <p className={`font-cond text-sm italic ${gone ? 'text-brown/55' : 'text-cream/85'}`}>
+            {gone ? 'Makasih yang udah gercep! Harga pre-order tetap lebih murah dari booth.' : (
+              <>
+                <span className="relative mr-1.5 inline-flex size-2 align-middle" aria-hidden>
+                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-cream opacity-70" />
+                  <span className="relative inline-flex size-2 rounded-full bg-cream" />
+                </span>
+                Sisa <Morph text={String(left)} className="font-bold not-italic" /> slot{href ? ' · tap buat pesan' : ' · 1× per nomor WA · dihitung waktu pesanan masuk'}
+              </>
+            )}
+          </p>
+        </div>
+        {href && !gone && <ArrowRight className="size-5 shrink-0" />}
+      </div>
+      {!gone && promo.slots <= 30 && (
+        <div className="mt-3 flex flex-wrap gap-1.5" aria-hidden>
+          {Array.from({ length: promo.slots }, (_, i) => (
+            <span key={i} className={`h-2 min-w-2.5 flex-1 rounded-full transition-colors duration-500 ${i < used ? 'bg-cream/25' : 'bg-cream'}`} style={{ transitionDelay: `${i * 30}ms` }} />
+          ))}
+        </div>
+      )}
+    </Box>
   )
 }
 
@@ -470,6 +534,14 @@ export function OrderTracker({ order, config, onBack, onProof, checkedAt }: { or
           <motion.div key="pay" className="flex w-full flex-col items-center" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, filter: 'blur(8px)' }}>
             <h1 className="mt-4 font-display text-3xl font-bold">Tinggal bayar</h1>
             <p className="mt-1 max-w-sm font-display text-brown-soft">Transfer persis sejumlah ini, lalu tunggu sebentar — kode ambilmu muncul di sini setelah kami cek.</p>
+            {!!order.promo && (
+              <p className="mt-3 inline-flex items-center gap-2 rounded-full bg-leaf px-4 py-1.5 font-display text-sm font-semibold text-cream">
+                <Gift className="size-4" /> Dapat promo pemesan pertama −{rupiah(order.promo)}
+              </p>
+            )}
+            {order.promoMissed && !order.promo && (
+              <p className="mt-3 max-w-sm rounded-2xl bg-brown/5 px-4 py-2 font-display text-sm text-brown-soft">Yah, slot promonya keburu habis duluan 🥲 Totalnya pakai harga pre-order biasa (tetap lebih murah dari booth).</p>
+            )}
 
             <div className="mt-5 w-full max-w-sm rounded-3xl bg-brown p-5 text-cream">
               <p className="font-cond text-sm italic text-cream/70">Total transfer</p>
@@ -526,6 +598,12 @@ export function OrderTracker({ order, config, onBack, onProof, checkedAt }: { or
             <span className="tabular-nums">{rupiah(i.price * i.qty)}</span>
           </p>
         ))}
+        {!!order.promo && (
+          <p className="flex justify-between font-display font-semibold text-leaf">
+            <span className="flex items-center gap-1.5"><Gift className="size-4" /> Promo pemesan pertama</span>
+            <span className="tabular-nums">−{rupiah(order.promo)}</span>
+          </p>
+        )}
         <p className="mt-2 flex justify-between border-t border-brown/10 pt-2 font-display text-lg font-bold">
           <span>Total</span>
           <span className="tabular-nums">{rupiah(order.total)}</span>

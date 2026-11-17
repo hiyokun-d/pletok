@@ -23,6 +23,8 @@ interface MenuState {
   prices?: Record<string, number>
   /** the crew closed the booth early (everything sold) */
   closedAt?: number
+  /** /config "Putar A+G": when the booth screen should play the attention show (epoch ms) */
+  attnAt?: number
   /** last change, to tell the newer copy apart when syncing */
   at?: number
 }
@@ -44,6 +46,7 @@ export interface LiveMenu {
   allSoldOut: boolean
   anySoldOut: boolean
   closedEarly: boolean
+  attnAt?: number
 }
 
 const KEY = 'pletok:menu'
@@ -114,7 +117,7 @@ function derive(s: MenuState): LiveMenu {
     return { ...b, items, price: price(b.name, b.price), normal, detail: edited ? describe(items) : b.detail, soldOut: !!reason, reason, edited }
   })
   const allSoldOut = drinks.every((d) => d.soldOut)
-  return { drinks, bundles, allSoldOut, anySoldOut: drinks.some((d) => d.soldOut) || bundles.some((b) => b.soldOut), closedEarly: !!s.closedAt }
+  return { drinks, bundles, allSoldOut, anySoldOut: drinks.some((d) => d.soldOut) || bundles.some((b) => b.soldOut), closedEarly: !!s.closedAt, attnAt: s.attnAt }
 }
 
 // set up after the helpers above — derive() needs describe() when a saved bundle was edited
@@ -184,6 +187,11 @@ export function setBundleForced(name: string, forced: boolean) {
 /** everything's gone → close the booth now instead of waiting for 16:00 (undo: `false`) */
 export function setClosedEarly(closed: boolean) {
   commit({ ...state, closedAt: closed ? Date.now() : undefined })
+}
+
+/** A+G from a phone: the booth plays the attention show `delayMs` from now (null = cancel) */
+export function scheduleAttention(delayMs: number | null) {
+  commit({ ...state, attnAt: delayMs === null ? undefined : Date.now() + delayMs })
 }
 
 /** today's menu price for a drink id or bundle name; `null` = back to the printed menu */

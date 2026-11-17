@@ -12,7 +12,7 @@ import {
 import { EVENT } from "../data/event";
 import { ErrorPage } from "./ErrorPage";
 import { DEFAULT_CUTOFF, PREORDER_ITEMS, rupiah } from "../data/preorder";
-import { BACKEND, findOrders, submitPreorder } from "../lib/backend";
+import { BACKEND, findOrders, promoOff, submitPreorder } from "../lib/backend";
 import { trackClick } from "../lib/analytics";
 import { usePreorder } from "../hooks/usePreorder";
 import { BackButton } from "../components/BackButton";
@@ -23,6 +23,7 @@ import {
   AdminContact,
   FindOrder,
   NoRefund,
+  PromoBanner,
   WaInput,
   waValid,
   MyOrdersList,
@@ -53,7 +54,7 @@ const dateLong = (ms: number) =>
  * everything, so the total here is only a preview.
  */
 export function PreorderPage() {
-  const { config, loaded, open } = usePreorder();
+  const { config, loaded, open, promoLeft } = usePreorder();
   // no answer from the Sheet after a while → say so instead of an endless sprout
   const [stuck, setStuck] = useState(false);
   useEffect(() => {
@@ -115,6 +116,8 @@ export function PreorderPage() {
     (t, i) => t + Math.max(0, i.normal - i.price) * qty[i.id],
     0,
   );
+  // what the screen expects the first-N promo to take off — the Sheet has the final word
+  const promoEst = promoLeft > 0 ? promoOff(config.promo, total) : 0;
   // stored as the part after +62; sent as 08…
   const waOk = waValid(wa);
   const ready = lines.length > 0 && name.trim() && waOk;
@@ -156,6 +159,8 @@ export function PreorderPage() {
         status: r.status,
         code: "",
         ref: r.ref,
+        promo: r.promo ?? 0,
+        promoMissed: promoEst > 0 && !r.promo,
         lines: lines.map((i) => ({
           id: i.id,
           name: i.name,
@@ -303,6 +308,9 @@ export function PreorderPage() {
                 <AdminContact />
               </header>
 
+              {config.promo?.on && config.promo.value > 0 && (
+                <PromoBanner promo={config.promo} left={promoLeft} loud />
+              )}
               <MyOrdersList orders={mine.orders} onOpen={setTrackId} />
               <FindOrder onFound={mine.merge} onOpen={setTrackId} notice={linkMiss} />
 
@@ -426,7 +434,9 @@ export function PreorderPage() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 8 }}
                     >
-                      Pre-order bikin kamu hemat {rupiah(saved)}!
+                      {promoEst > 0
+                        ? `Hemat ${rupiah(saved)} + promo ${rupiah(promoEst)}!`
+                        : `Pre-order bikin kamu hemat ${rupiah(saved)}!`}
                     </motion.p>
                   )}
                 </AnimatePresence>
@@ -443,7 +453,12 @@ export function PreorderPage() {
                         ? "Isi nama & WhatsApp"
                         : `Lanjut bayar · ${cups} cup`}
                   </span>
-                  <span className="tabular-nums">{rupiah(total)}</span>
+                  <span className="flex shrink-0 flex-col items-end leading-tight tabular-nums">
+                    {promoEst > 0 && (
+                      <s className="text-xs font-normal opacity-70">{rupiah(total)}</s>
+                    )}
+                    {rupiah(total - promoEst)}
+                  </span>
                 </motion.button>
               </div>
             </motion.form>

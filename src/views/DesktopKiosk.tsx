@@ -171,7 +171,8 @@ const panelIn = (dir: -1 | 1 | 0, delay = 0) => ({
 
 function ScanCta() {
   const feedback = useFeedbackOpen().open
-  const preorder = usePreorder().open
+  const { open: preorder, config: poConfig, promoLeft } = usePreorder()
+  const promo = preorder && poConfig.promo?.on && promoLeft > 0 ? poConfig.promo : null
   return (
     <div className="flex shrink-0 items-center gap-[1.4vh] rounded-2xl bg-brown p-[1.5vh] text-cream">
       <motion.div className="grid size-[clamp(2rem,5vh,2.8rem)] shrink-0 place-items-center rounded-xl bg-cream/10" animate={{ scale: [1, 1.12, 1] }} transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}>
@@ -180,10 +181,14 @@ function ScanCta() {
       <div className="min-w-0 flex-1 leading-tight">
         {/* remote switches (/config) swap the words with a blur instead of a jump */}
         <AnimatePresence mode="popLayout" initial={false}>
-          <motion.div key={`${preorder}-${feedback}`} initial={{ opacity: 0, y: 8, filter: 'blur(6px)' }} animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }} exit={{ opacity: 0, y: -8, filter: 'blur(6px)' }} transition={{ duration: 0.35 }}>
+          <motion.div key={`${preorder}-${feedback}-${!!promo}`} initial={{ opacity: 0, y: 8, filter: 'blur(6px)' }} animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }} exit={{ opacity: 0, y: -8, filter: 'blur(6px)' }} transition={{ duration: 0.35 }}>
             <p className="whitespace-nowrap font-display text-[clamp(0.95rem,2.2vh,1.25rem)] font-semibold">{preorder ? 'Scan buat pre-order!' : 'Scan QR-nya!'}</p>
             <p className="truncate font-cond text-[clamp(0.75rem,1.6vh,0.95rem)] italic opacity-80">
-              {preorder ? 'Pesan sekarang, ambil di booth · IG kami' : feedback ? 'Feedback & Instagram kami' : 'Follow Instagram kami'}
+              {promo ? (
+                <>
+                  Promo {promo.slots} pemesan pertama · sisa <Morph text={String(promoLeft)} className="font-bold not-italic" /> slot!
+                </>
+              ) : preorder ? 'Pesan sekarang, ambil di booth · IG kami' : feedback ? 'Feedback & Instagram kami' : 'Follow Instagram kami'}
             </p>
           </motion.div>
         </AnimatePresence>

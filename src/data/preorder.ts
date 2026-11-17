@@ -29,6 +29,7 @@ export const DEFAULT_PREORDER: PreorderConfig = {
   cutoff: DEFAULT_CUTOFF,
   items: Object.fromEntries(PREORDER_ITEMS.map((i) => [i.id, { on: true, price: i.price }])),
   bca: { number: '', holder: '' },
+  promo: { on: false, slots: 10, mode: 'rp', value: 3 },
 }
 
 export const rupiah = (k: number) => `Rp${(k * 1000).toLocaleString('id-ID')}`

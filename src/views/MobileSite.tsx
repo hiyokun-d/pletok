@@ -14,6 +14,7 @@ import { CupCard } from '../components/CupCard'
 import { BundleCard } from '../components/BundleCard'
 import { EventStatus } from '../components/EventStatus'
 import { usePreorder } from '../hooks/usePreorder'
+import { PromoBanner } from '../components/OrderTracker'
 import { useFeedbackOpen } from '../hooks/useFeedbackOpen'
 import { SignalBars } from '../components/SignalBars'
 import { Reveal, RevealItem } from '../components/Reveal'
@@ -39,7 +40,8 @@ function SectionTitle({ kicker, title }: { kicker: string; title: string }) {
 
 export function MobileSite({ onEgg }: { onEgg: () => void }) {
   const menu = useMenu()
-  const preorder = usePreorder().open
+  const { open: preorder, config: poConfig, promoLeft } = usePreorder()
+  const promoLive = preorder && !!poConfig.promo?.on && promoLeft > 0
   const feedback = useFeedbackOpen().open
   const { phase } = useEventPhase()
   const heroRef = useRef<HTMLElement>(null)
@@ -79,6 +81,15 @@ export function MobileSite({ onEgg }: { onEgg: () => void }) {
         <Ornament variant="leaf" className="absolute -right-6 top-24 w-24 rotate-[160deg]" delay={0.2} />
         <Ornament variant="spice-star" className="absolute left-6 top-[46%] w-10" delay={0.4} />
         <Ornament variant="spice-star" className="absolute right-8 top-[40%] w-8" delay={0.6} />
+
+        {/* first-N promo, live — the first thing on the page while slots are left */}
+        <AnimatePresence>
+          {promoLive && poConfig.promo && (
+            <motion.div key="promo" className="relative z-20 mb-5 mt-4 w-full max-w-sm" initial={{ opacity: 0, y: -24, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.9, filter: 'blur(6px)' }} transition={{ ...spring.pop, delay: 0.4 }}>
+              <PromoBanner promo={poConfig.promo} left={promoLeft} href="/preorder" loud />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <motion.div style={{ y: logoY, scale: logoScale }} initial="hidden" animate="show" variants={drop} className="relative mb-4 w-[min(84vw,400px)]">
           {/* every letter bounces, the leaf shakes & sheds leaves when tapped */}
