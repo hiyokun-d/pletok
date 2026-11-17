@@ -7,8 +7,6 @@ import { signal } from '../lib/events'
 import { toggleFullscreen, useFullscreen } from '../hooks/useFullscreen'
 import { isBoothDevice, setBoothDevice } from '../lib/analytics'
 import { spring } from '../lib/motion'
-import { useFeedbackOpen } from '../hooks/useFeedbackOpen'
-import { setFeedbackMode } from '../hooks/useMenu'
 
 const OPTIONS: Array<{ id: Phase | null; label: string }> = [
   { id: null, label: 'Auto' },
@@ -139,11 +137,8 @@ export function PhaseControl() {
               })}
             </div>
 
-            <Label>Form feedback</Label>
-            <FeedbackSwitch />
-
             <a href="/hasil" target="_blank" rel="noreferrer" className="mt-2 flex items-center justify-between rounded-2xl bg-cream/5 px-4 py-2.5 font-display text-sm font-semibold hover:bg-cream/10">
-              Lihat hasil feedback (grafik) <span className="font-cond text-xs italic text-cream/50">/hasil · PIN crew ↗</span>
+              Admin: hasil & buka/tutup form feedback <span className="font-cond text-xs italic text-cream/50">/hasil · PIN ↗</span>
             </a>
 
             <Label>Waktu</Label>
@@ -244,33 +239,6 @@ export function PhaseControl() {
         )}
       </AnimatePresence>
     </>
-  )
-}
-
-/** Auto = open from 13.00 until 25 min after closing; Buka / Tutup override it (synced to phones) */
-function FeedbackSwitch() {
-  const { open, mode, until } = useFeedbackOpen()
-  const hhmm = new Date(until).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit' })
-  const opts = [
-    { id: 'auto', label: 'Auto' },
-    { id: 'open', label: 'Buka' },
-    { id: 'closed', label: 'Tutup' },
-  ] as const
-  return (
-    <div className="flex items-center gap-3">
-      <div className="relative grid flex-1 grid-cols-3 gap-1 rounded-2xl bg-cream/5 p-1">
-        {opts.map((o) => (
-          <button key={o.id} onClick={() => setFeedbackMode(o.id)} className="relative rounded-xl px-2 py-2 font-display text-sm font-semibold">
-            {mode === o.id && <motion.span layoutId="fb-pill" className="absolute inset-0 rounded-xl bg-terracotta" transition={spring.snappy} />}
-            <span className="relative">{o.label}</span>
-          </button>
-        ))}
-      </div>
-      <span className={`shrink-0 rounded-full px-2.5 py-1 font-cond text-xs font-semibold italic ${open ? 'bg-leaf' : 'bg-cream/10 text-cream/60'}`}>
-        {open ? 'terbuka' : 'tertutup'}
-        {mode === 'auto' && ` · auto s/d ${hhmm}`}
-      </span>
-    </div>
   )
 }
 

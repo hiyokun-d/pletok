@@ -66,6 +66,15 @@ function doPost(e) {
       return json_({ ok: true })
     }
 
+    // admin (/hasil): open / close the feedback form for every phone — 'auto' follows the schedule
+    if (b.type === 'feedback-mode') {
+      if (!b.pin || b.pin !== props.getProperty('CREW_PIN')) return json_({ ok: false, error: 'pin' })
+      if (['auto', 'open', 'closed'].indexOf(b.mode) === -1) return json_({ ok: false, error: 'mode' })
+      props.setProperty('FEEDBACK_MODE', b.mode)
+      CacheService.getScriptCache().remove('stats')
+      return json_({ ok: true })
+    }
+
     if (b.type === 'pin') return json_({ ok: b.pin === props.getProperty('CREW_PIN') })
 
     // crew-only: every answer (incl. contacts) for the /hasil page — PIN in the body, never in a URL
@@ -129,6 +138,7 @@ function doGet() {
     qrBooth: scans.filter((t) => t === 'link' || t === 'ig').length,
     qrFeedback: scans.filter((t) => t === 'feedback').length,
     menu: menu ? JSON.parse(menu) : null,
+    feedbackMode: PropertiesService.getScriptProperties().getProperty('FEEDBACK_MODE') || 'auto',
   })
   cache.put('stats', out, 10)
   return ContentService.createTextOutput(out).setMimeType(ContentService.MimeType.JSON)

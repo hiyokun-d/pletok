@@ -75,6 +75,8 @@ export interface RemoteStats {
   qrBooth: number
   qrFeedback: number
   menu: { state: unknown; at: number } | null
+  /** set from /hasil only; 'auto' = follow the schedule */
+  feedbackMode?: 'auto' | 'open' | 'closed'
 }
 
 export async function fetchStats(): Promise<RemoteStats | null> {
@@ -134,6 +136,14 @@ export async function fetchResults(pin: string): Promise<Results | 'pin' | null>
   } catch {
     return null
   }
+}
+
+/** admin switch for the feedback form (from /hasil) — the PIN is checked by the Sheet */
+export async function setFeedbackModeRemote(pin: string, mode: 'auto' | 'open' | 'closed'): Promise<boolean> {
+  if (!BACKEND) return false
+  const ok = await post({ type: 'feedback-mode', pin, mode })
+  if (ok) void pollOnce()
+  return ok
 }
 
 export const pushMenu = (state: unknown) => {

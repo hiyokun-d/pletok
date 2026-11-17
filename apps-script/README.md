@@ -18,6 +18,7 @@ Every feedback, every QR scan and the sold-out state are saved in **one Google S
    - in Vercel → Project → Settings → Environment Variables: `VITE_BACKEND_URL` = that URL, then **Redeploy**;
    - locally, in `.env.local` (not committed): `VITE_BACKEND_URL=…`
 6. On the booth laptop, open **A + C**, enter the PIN, then press **Sambung**. Sold-out changes now reach every phone.
+7. Admins: open **`/hasil`** with the PIN to see results and to open or close the feedback form remotely. The switch is saved as the script property `FEEDBACK_MODE`.
 
 Changed `Code.gs` later? Go to **Deploy → Manage deployments → ✏️ → Version: New version → Deploy**. The URL stays the same.
 

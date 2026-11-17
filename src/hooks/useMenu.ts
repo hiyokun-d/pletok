@@ -18,12 +18,9 @@ interface BundleOverride {
 interface MenuState {
   soldAt: Partial<Record<DrinkId, number>>
   bundles: Record<string, BundleOverride>
-  /** crew override for the feedback form; unset = follow the schedule (see useFeedbackOpen) */
-  feedback?: FeedbackMode
   /** last change, to tell the newer copy apart when syncing */
   at?: number
 }
-export type FeedbackMode = 'open' | 'closed'
 
 export interface LiveDrink extends Drink {
   soldOut: boolean
@@ -41,7 +38,6 @@ export interface LiveMenu {
   bundles: LiveBundle[]
   allSoldOut: boolean
   anySoldOut: boolean
-  feedbackMode: FeedbackMode | 'auto'
 }
 
 const KEY = 'pletok:menu'
@@ -99,7 +95,7 @@ function derive(s: MenuState): LiveMenu {
     return { ...b, items, normal, detail: edited ? describe(items) : b.detail, soldOut: !!reason, reason, edited }
   })
   const allSoldOut = drinks.every((d) => d.soldOut)
-  return { drinks, bundles, allSoldOut, feedbackMode: s.feedback ?? 'auto', anySoldOut: drinks.some((d) => d.soldOut) || bundles.some((b) => b.soldOut) }
+  return { drinks, bundles, allSoldOut, anySoldOut: drinks.some((d) => d.soldOut) || bundles.some((b) => b.soldOut) }
 }
 
 // set up after the helpers above — derive() needs describe() when a saved bundle was edited
@@ -147,12 +143,7 @@ export function setBundleForced(name: string, forced: boolean) {
   commit({ ...state, bundles: { ...state.bundles, [name]: { ...cur, forced } } })
 }
 
-/** force the feedback form open/closed, or back to the schedule */
-export function setFeedbackMode(mode: FeedbackMode | 'auto') {
-  commit({ ...state, feedback: mode === 'auto' ? undefined : mode })
-}
-
-/** restock: everything back on sale, bundles back to their recipe (the feedback setting stays) */
+/** restock: everything back on sale, bundles back to their recipe */
 export function resetMenu() {
-  commit({ ...empty(), feedback: state.feedback })
+  commit(empty())
 }

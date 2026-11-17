@@ -120,7 +120,7 @@ export function FeedbackPage() {
               Mengirim pesanmu…
             </motion.p>
           </motion.section>
-        ) : !open && !sent ? (
+        ) : !open && !sent && !filled ? ( // someone mid-answer keeps their form even if it closes
           <motion.section key="closed" className="mx-auto flex min-h-[80dvh] max-w-md flex-col items-center justify-center text-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <BackButton className="fixed left-5 top-6" />
             <Sprout state="grow" className="h-auto w-16" />

@@ -1,9 +1,10 @@
 import { motion } from 'motion/react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Crown, Download, ExternalLink, HelpCircle, Lightbulb, Lock, MessageCircleHeart, RefreshCw, ScanLine, Sparkles, Star, ThumbsUp, Users } from 'lucide-react'
+import { Crown, Download, ShieldCheck, ExternalLink, HelpCircle, Lightbulb, Lock, MessageCircleHeart, RefreshCw, ScanLine, Sparkles, Star, ThumbsUp, Users } from 'lucide-react'
 import { EVENT } from '../data/event'
 import { DRINKS } from '../data/menu'
-import { BACKEND, crewPin, fetchResults, setCrewPin, type Response, type Results } from '../lib/backend'
+import { BACKEND, crewPin, fetchResults, setCrewPin, setFeedbackModeRemote, type Response, type Results } from '../lib/backend'
+import { useFeedbackOpen, type FeedbackMode } from '../hooks/useFeedbackOpen'
 import { spring } from '../lib/motion'
 
 /**
@@ -87,8 +88,56 @@ export function HasilPage() {
         </div>
       </header>
 
+      {!DEMO && <AdminPanel pin={pin} />}
       {data && <Summary data={data} />}
     </Shell>
+  )
+}
+
+/* ------------------------------------------------------------------ admin */
+
+const MODES: Array<{ id: FeedbackMode; label: string; hint: string }> = [
+  { id: 'auto', label: 'Auto', hint: 'ikut jadwal' },
+  { id: 'open', label: 'Buka', hint: 'paksa buka' },
+  { id: 'closed', label: 'Tutup', hint: 'paksa tutup' },
+]
+
+/** the ONLY place the feedback form is opened / closed — saved in the Sheet, every phone follows */
+function AdminPanel({ pin }: { pin: string }) {
+  const { open, mode, until } = useFeedbackOpen()
+  const [saving, setSaving] = useState<FeedbackMode | null>(null)
+  const [failed, setFailed] = useState(false)
+  const pick = async (m: FeedbackMode) => {
+    setSaving(m)
+    setFailed(false)
+    const ok = await setFeedbackModeRemote(pin, m)
+    setSaving(null)
+    if (!ok) setFailed(true)
+  }
+  return (
+    <section className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-3xl bg-brown p-5 text-cream">
+      <div className="flex items-center gap-3">
+        <span className="grid size-11 place-items-center rounded-2xl bg-cream/10"><ShieldCheck className="size-5 text-yakult" /></span>
+        <div>
+          <p className="font-display text-lg font-bold leading-tight">
+            Form feedback{' '}
+            <span className={`ml-1 rounded-full px-2.5 py-0.5 align-middle font-cond text-sm font-semibold italic ${open ? 'bg-leaf' : 'bg-cream/15 text-cream/70'}`}>{open ? 'terbuka' : 'tertutup'}</span>
+          </p>
+          <p className="font-cond text-sm italic text-cream/60">
+            {failed ? 'Gagal menyimpan — cek sinyal / PIN' : mode === 'auto' ? `Auto: buka ${EVENT.timeLabel.split(' –')[0]} s/d ${hhmm(until)} (25 menit setelah tutup)` : 'Manual — semua HP ikut dalam ±30 detik'}
+          </p>
+        </div>
+      </div>
+      <div className="relative grid grid-cols-3 gap-1 rounded-2xl bg-cream/10 p-1">
+        {MODES.map((m) => (
+          <button key={m.id} onClick={() => void pick(m.id)} disabled={!!saving} className="relative min-w-24 rounded-xl px-3 py-2 text-center">
+            {mode === m.id && <motion.span layoutId="admin-mode" className="absolute inset-0 rounded-xl bg-terracotta" transition={spring.snappy} />}
+            <span className="relative block font-display text-sm font-semibold">{saving === m.id ? '…' : m.label}</span>
+            <span className="relative block font-cond text-[0.7rem] italic text-cream/60">{m.hint}</span>
+          </button>
+        ))}
+      </div>
+    </section>
   )
 }
 
