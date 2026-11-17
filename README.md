@@ -49,7 +49,7 @@ VITE_FEEDBACK_URL=https://forms.gle/your-form
 ### Other
 | File | What it is |
 |---|---|
-| `public/favicon.ico` | Browser tab icon |
+| `public/favicon.svg`, `favicon.ico` | Tab icon — the Pletok sprout in cream on a brown tile |
 | `src/components/Ornament.tsx` | Decorations redrawn as SVG from our poster: batik corner, 4-petal spice star, leaf, sunburst dashes |
 | `src/components/InstagramIcon.tsx` | Instagram glyph |
 
@@ -135,6 +135,21 @@ Everything runs on one shared clock, so changing the time moves every countdown,
 | `?now=2026-11-25T12:59:57%2B07:00` | Start the clock at that moment (`%2B` = `+`) — this one plays the grand opening |
 
 ---
+
+## SEO & sharing
+
+Live at **https://pletok.hiyokun.dev** (set in `vite.config.ts` as `SITE_URL`; override with a `SITE_URL` env var for another deploy).
+
+| What | Where |
+|---|---|
+| Title, description, keywords, canonical | `index.html` |
+| Link previews (WhatsApp, Instagram, LINE, Facebook, X) — 1200×630 card | `public/og-image.jpg` |
+| Event structured data (date, place, menu prices) for Google | JSON-LD in `index.html` |
+| App icons + "Add to Home Screen" | `public/favicon.svg`, `favicon.ico`, `icon-192.png`, `icon-512.png`, `icon-maskable.png`, `apple-touch-icon.png`, `manifest.webmanifest` |
+| `robots.txt` + `sitemap.xml` | written at build time by the `pletok-seo` plugin in `vite.config.ts` |
+| Text for crawlers without JavaScript | `<noscript>` block in `index.html` |
+
+Check a preview after deploying: [opengraph.xyz](https://www.opengraph.xyz/), Google's [Rich Results Test](https://search.google.com/test/rich-results).
 
 ## Tech
 
