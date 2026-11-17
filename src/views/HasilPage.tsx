@@ -1,9 +1,11 @@
 import { motion } from 'motion/react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Check, Crown, Download, ExternalLink, HelpCircle, Lightbulb, Loader2, MessageCircle, MessageCircleHeart, RefreshCw, ScanLine, Search, Settings2, ShoppingBag, Sparkles, Star, ThumbsUp, Users, Wallet } from 'lucide-react'
+import { ArrowRight, Check, Crown, Download, ExternalLink, HelpCircle, Hourglass, ImageIcon, Lightbulb, Loader2, MessageCircle, MessageCircleHeart, PackageCheck, RefreshCw, ScanLine, Search, Send, Settings2, ShoppingBag, Sparkles, Star, ThumbsUp, Undo2, Users, Wallet, X } from 'lucide-react'
 import { EVENT } from '../data/event'
 import { DRINKS } from '../data/menu'
-import { BACKEND, crewPin, fetchResults, setOrderDone, type Order, type Response, type Results } from '../lib/backend'
+import { AnimatePresence } from 'motion/react'
+import { BACKEND, crewPin, fetchProof, fetchResults, updateOrder, type Order, type OrderStatus, type Response, type Results } from '../lib/backend'
+import { usePreorder } from '../hooks/usePreorder'
 import { PREORDER_ITEMS, rupiah } from '../data/preorder'
 import { spring } from '../lib/motion'
 import { Btn, Card, CrewNav, DEMO, Empty, PinGate, Shell, Tile, WAIT, dayTime, hhmm, useCrewPage, wait } from './adminUi'
@@ -33,6 +35,7 @@ export function HasilPage() {
   const [data, setData] = useState<Results | null>(DEMO ? demoResults() : null)
   const [state, setState] = useState<'idle' | 'loading' | 'error' | 'pin'>('idle')
   const [at, setAt] = useState<number | undefined>(DEMO ? Date.now() : undefined)
+  const preorderOpen = usePreorder().open
   useCrewPage('Hasil')
 
   const load = useCallback(async () => {
@@ -89,13 +92,19 @@ export function HasilPage() {
       {data?.orders && (
         <Orders
           orders={data.orders}
-          setDone={async (code, done) => {
+          preorderOpen={preorderOpen}
+          loadProof={(id) => (DEMO ? wait(700).then(() => ({ image: DRINKS[0].image, name: 'Contoh bukti.jpg', url: '#' })) : fetchProof(pin, id))}
+          update={async (id, patch) => {
             if (DEMO) {
               await wait(1200)
-              setData((d) => d && { ...d, orders: d.orders?.map((o) => (o.code === code ? { ...o, done } : o)) })
+              setData((d) => {
+                if (!d) return d
+                const next = Math.max(0, ...(d.orders ?? []).map((o) => Number(o.code.match(/(\d+)$/)?.[1]) || 0)) + 1
+                return { ...d, orders: d.orders?.map((o) => (o.id === id ? { ...o, ...patch, code: o.code || (patch.status === 'process' || patch.status === 'done' ? pickupCode(o.name, next) : '') } : o)) }
+              })
               return true
             }
-            const ok = await setOrderDone(pin, code, done)
+            const ok = await updateOrder(pin, id, patch)
             if (ok) void load()
             return ok
           }}
@@ -109,46 +118,80 @@ export function HasilPage() {
 /* ------------------------------------------------------------------ orders */
 
 /** 0812… / +62812… / 812… → 62812… for wa.me */
-const waLink = (wa: string, code: string) => {
+const waLink = (wa: string, text: string) => {
   let d = wa.replace(/\D/g, '')
   if (d.startsWith('0')) d = '62' + d.slice(1)
   else if (d.startsWith('8')) d = '62' + d
-  return `https://wa.me/${d}?text=${encodeURIComponent(`Halo kak! Dari Pletok, soal pre-order ${code} `)}`
+  return `https://wa.me/${d}?text=${encodeURIComponent(text)}`
 }
+/** when & where — every message ends with it */
+// plain ">" bullets: emoji arrive as "�" on some phones through a wa.me link
+const PICKUP = `> Ambil di ${EVENT.table}, ${EVENT.place} · ${EVENT.campus}\n> ${EVENT.dateLabel}, ${EVENT.timeLabel}`
+const codeMessage = (o: Order) =>
+  `Halo kak ${o.name}! Pembayaran pre-order Pletok kamu sudah kami terima.\n\n> Kode ambil: *${o.code}*\n> Pesanan: ${o.summary} (${rupiah(o.total)})\n\n${PICKUP}\n\nTunjukkan kode ini + sebutkan nama ya. Makasih!`
+/** the WhatsApp button on every other status — the code (or kode cek before it's paid) and the pickup */
+const contactMessage = (o: Order) =>
+  o.status === 'hold'
+    ? `Halo kak ${o.name}! Dari Pletok, soal pre-order kamu: ${o.summary} (${rupiah(o.total)})${o.ref ? `, kode cek *${o.ref}*` : ''}.\n\nKami lagi cek transfernya — begitu masuk, kode ambilmu kami kirim di sini.\n\n${PICKUP}`
+    : o.status === 'rejected'
+      ? `Halo kak ${o.name}! Dari Pletok, soal pre-order kamu: ${o.summary} (${rupiah(o.total)})${o.ref ? `, kode cek *${o.ref}*` : ''}.\n\nTransfernya belum kami temukan — boleh kirim bukti transfernya di sini?\n\n${PICKUP}`
+      : `Halo kak ${o.name}! Dari Pletok, soal pre-order *${o.code}*: ${o.summary}.\n\n${PICKUP}`
 
-function Orders({ orders, setDone }: { orders: Order[]; setDone: (code: string, done: boolean) => Promise<boolean> }) {
-  // ticked here, not confirmed by the Sheet yet → yellow
-  const [pending, setPending] = useState<Record<string, boolean>>({})
+type Patch = { status?: OrderStatus; sent?: boolean }
+/** same as nextCode_ in Code.gs — for the demo only */
+const pickupCode = (name: string, n: number) => `${name.toLowerCase().split(/\s+/)[0].replace(/[^a-z0-9]/g, '').slice(0, 12) || 'pletok'}-${String(n).padStart(3, '0')}`
+type Proof = { image: string; name: string; url: string }
+const STATUS_LABEL: Record<OrderStatus, string> = { hold: 'Hold', process: 'Process', done: 'Diambil', rejected: 'Ditolak' }
+const STATUS_TONE: Record<OrderStatus, string> = { hold: 'bg-[#e8b53a] text-brown', process: 'bg-leaf text-cream', done: 'bg-brown/10 text-brown/60', rejected: 'bg-terracotta/15 text-terracotta' }
+
+/**
+ * Pre-orders as a queue. A new order is on HOLD until someone finds the transfer (BCA mutasi)
+ * and taps Verifikasi — that hands out its pickup code and moves it to PROCESS. While pre-order
+ * is still open the holds sit on top (to check); once it's closed, PROCESS goes on top (to make).
+ */
+function Orders({ orders, update, preorderOpen, loadProof }: { orders: Order[]; update: (id: string, patch: Patch) => Promise<boolean>; preorderOpen: boolean; loadProof: (id: string) => Promise<Proof | null> }) {
+  const [viewing, setViewing] = useState<Order | null>(null)
+  // tapped here, not confirmed by the Sheet yet → yellow
+  const [pending, setPending] = useState<Record<string, Patch>>({})
   const [failed, setFailed] = useState<string | null>(null)
   const [q, setQ] = useState('')
+  const [filter, setFilter] = useState<OrderStatus | 'all'>('all')
   useEffect(() => {
     setPending((p) => {
-      const left = Object.fromEntries(Object.entries(p).filter(([code, done]) => orders.find((o) => o.code === code)?.done !== done))
+      const left = Object.fromEntries(
+        Object.entries(p).filter(([id, patch]) => {
+          const o = orders.find((x) => x.id === id)
+          return o && ((patch.status && o.status !== patch.status) || (patch.sent !== undefined && o.sent !== patch.sent))
+        }),
+      )
       return Object.keys(left).length === Object.keys(p).length ? p : left
     })
   }, [orders])
-  const isDone = (o: Order) => pending[o.code] ?? o.done
-  const toggle = async (o: Order) => {
-    const next = !isDone(o)
-    setPending((p) => ({ ...p, [o.code]: next }))
+  const view = (o: Order): Order => ({ ...o, ...pending[o.id] })
+  const act = async (o: Order, patch: Patch) => {
+    setPending((p) => ({ ...p, [o.id]: { ...p[o.id], ...patch } }))
     setFailed(null)
-    if (!(await setDone(o.code, next))) {
-      setPending(({ [o.code]: _, ...rest }) => rest)
-      setFailed(o.code)
+    if (!(await update(o.id, patch))) {
+      setPending(({ [o.id]: _, ...rest }) => rest)
+      setFailed(o.code || o.name)
     }
   }
 
-  const doneCount = orders.filter(isDone).length
-  const revenue = orders.reduce((a, o) => a + o.total, 0)
-  // cups to make, split by what's still waiting for pickup
+  const all = orders.map(view)
+  const count = (st: OrderStatus) => all.filter((o) => o.status === st).length
+  const paid = all.filter((o) => o.status === 'process' || o.status === 'done')
+  const unsent = all.filter((o) => o.status === 'process' && !o.sent).length
+  // cups to make: verified orders only, split by what's still waiting for pickup
   const prep = DRINKS.map((d) => {
     const cups = (os: Order[]) => os.reduce((a, o) => a + o.lines.reduce((b, l) => b + l.qty * (PREORDER_ITEMS.find((i) => i.id === l.id)?.drinks.filter((x) => x === d.id).length ?? 0), 0), 0)
-    return { d, total: cups(orders), left: cups(orders.filter((o) => !isDone(o))) }
+    return { d, total: cups(paid), left: cups(paid.filter((o) => o.status === 'process')) }
   })
+  const rank: Record<OrderStatus, number> = preorderOpen ? { hold: 0, process: 1, done: 2, rejected: 3 } : { process: 0, hold: 1, done: 2, rejected: 3 }
   const needle = q.trim().toLowerCase()
-  const list = orders
-    .filter((o) => !needle || `${o.code} ${o.name} ${o.wa}`.toLowerCase().includes(needle))
-    .sort((a, b) => Number(a.done) - Number(b.done) || a.at - b.at)
+  const list = all
+    .filter((o) => filter === 'all' || o.status === filter)
+    .filter((o) => !needle || `${o.code} ${o.ref} ${o.name} ${o.wa} ${o.sender}`.toLowerCase().includes(needle))
+    .sort((a, b) => rank[a.status] - rank[b.status] || a.at - b.at)
 
   return (
     <Card
@@ -158,13 +201,13 @@ function Orders({ orders, setDone }: { orders: Order[]; setDone: (code: string, 
           <ShoppingBag className="size-5 text-terracotta" /> Daftar pre-order
         </span>
       }
-      meta={failed ? `Gagal menandai ${failed} — coba lagi` : 'Ambil di booth · cocokkan kode + nama, lalu tandai selesai'}
+      meta={failed ? `Gagal menyimpan ${failed} — coba lagi` : preorderOpen ? 'Pre-order masih buka · Hold di atas: cek mutasi BCA, lalu Verifikasi' : 'Pre-order tutup · Process di atas: yang harus dibuat & diambil'}
     >
       <div className="grid gap-3 sm:grid-cols-3">
-        <Tile Icon={ShoppingBag} label="Pesanan" value={orders.length} sub={`${doneCount} sudah diambil · ${orders.length - doneCount} menunggu`} />
-        <Tile Icon={Wallet} label="Total pre-order" value={rupiah(revenue)} sub="bayar di booth saat ambil" />
+        <Tile Icon={Hourglass} label="Perlu dicek (hold)" value={count('hold')} sub={`${orders.length} pesanan · ${count('rejected')} ditolak`} />
+        <Tile Icon={Wallet} label="Sudah dibayar" value={rupiah(paid.reduce((a, o) => a + o.total, 0))} sub={`${paid.length} terverifikasi · ${unsent} kode belum dikirim`} />
         <div className="rounded-3xl border border-brown/10 bg-cream/80 p-5">
-          <span className="font-cond text-sm italic text-brown-soft">Cup yang perlu disiapkan</span>
+          <span className="font-cond text-sm italic text-brown-soft">Cup yang perlu disiapkan (sudah bayar)</span>
           <ul className="mt-2 space-y-1">
             {prep.map(({ d, total, left }) => (
               <li key={d.id} className="flex items-baseline justify-between gap-2 font-display text-sm">
@@ -179,11 +222,18 @@ function Orders({ orders, setDone }: { orders: Order[]; setDone: (code: string, 
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <label className="flex flex-1 items-center gap-2 rounded-full bg-cream-deep/70 px-4 py-2.5">
+        <div className="flex flex-wrap gap-1.5">
+          {(['all', 'hold', 'process', 'done', 'rejected'] as const).map((f) => (
+            <button key={f} type="button" onClick={() => setFilter(f)} className={`rounded-full px-3.5 py-2 font-display text-sm font-semibold ${filter === f ? 'bg-brown text-cream' : 'bg-cream-deep/70 text-brown/70'}`}>
+              {f === 'all' ? 'Semua' : STATUS_LABEL[f]} <span className="tabular-nums opacity-60">{f === 'all' ? all.length : count(f)}</span>
+            </button>
+          ))}
+        </div>
+        <label className="flex min-w-48 flex-1 items-center gap-2 rounded-full bg-cream-deep/70 px-4 py-2.5">
           <Search className="size-4 text-brown/50" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari nama / kode / nomor" className="w-full bg-transparent font-cond outline-none" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari nama / kode / kode cek / nomor / pengirim" className="w-full bg-transparent font-cond outline-none" />
         </label>
-        <Btn onClick={() => downloadOrders(orders)} icon={<Download className="size-4" />}>Unduh CSV</Btn>
+        <Btn onClick={() => downloadOrders(all)} icon={<Download className="size-4" />}>Unduh CSV</Btn>
       </div>
 
       {list.length === 0 ? (
@@ -191,38 +241,114 @@ function Orders({ orders, setDone }: { orders: Order[]; setDone: (code: string, 
       ) : (
         <ul className="mt-3 divide-y divide-brown/10">
           {list.map((o) => {
-            const done = isDone(o)
-            const syncing = o.code in pending
+            const syncing = o.id in pending
+            const faded = (o.status === 'done' || o.status === 'rejected') && !syncing
             return (
-              <motion.li layout key={o.code} transition={spring.snappy} className={`flex flex-wrap items-center gap-x-4 gap-y-2 py-3 ${done && !syncing ? 'opacity-55' : ''}`}>
-                <button
-                  onClick={() => void toggle(o)}
-                  aria-pressed={done}
-                  aria-label={done ? `Batalkan selesai ${o.code}` : `Tandai ${o.code} selesai`}
-                  className={`grid size-9 shrink-0 place-items-center rounded-full border-2 transition-colors ${syncing ? 'border-transparent text-brown' : done ? 'border-leaf bg-leaf text-cream' : 'border-brown/25 text-transparent hover:border-leaf hover:text-leaf/50'}`}
-                  style={syncing ? { background: WAIT } : undefined}
-                >
-                  {syncing ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" strokeWidth={3} />}
-                </button>
-                <div className="min-w-0 flex-1 basis-56">
-                  <p className="font-display font-semibold">
-                    <span className="mr-2 rounded-md bg-brown px-1.5 py-0.5 font-cond text-sm tracking-wide text-cream">{o.code}</span>
+              <motion.li layout key={o.id} transition={spring.snappy} className={`flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl py-3 ${faded ? 'opacity-55' : ''}`} style={syncing ? { boxShadow: `inset 3px 0 0 ${WAIT}` } : undefined}>
+                <div className="min-w-0 flex-1 basis-64 pl-2">
+                  <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-display font-semibold">
+                    <span className={`rounded-full px-2.5 py-0.5 font-cond text-xs font-semibold uppercase tracking-wider ${STATUS_TONE[o.status]}`} style={syncing ? { background: WAIT, color: '#5a2e1a' } : undefined}>
+                      {syncing && <Loader2 className="mr-1 inline size-3 animate-spin" />}
+                      {STATUS_LABEL[o.status]}
+                    </span>
+                    {o.code && <span className="rounded-md bg-brown px-1.5 py-0.5 font-cond text-sm tracking-wide text-cream">{o.code}</span>}
                     {o.name}
-                    <span className="ml-2 font-cond text-sm font-normal italic text-brown/55">{dayTime(o.at)}</span>
+                    <span className="font-cond text-sm font-normal italic text-brown/55">{dayTime(o.at)}</span>
                   </p>
                   <p className="mt-0.5 font-cond text-brown-soft">{o.summary}</p>
+                  <p className="font-cond text-sm italic text-brown/60">
+                    {o.pay}
+                    {o.ref && ` · kode cek ${o.ref}`}
+                    {o.sender && ` · pengirim: ${o.sender}`}
+                    {o.status === 'process' && (o.sent ? ' · kode sudah dikirim' : ' · kode BELUM dikirim')}
+                  </p>
                   {o.note && <p className="font-cond text-sm italic text-terracotta">“{o.note}”</p>}
                 </div>
                 <span className="font-display font-bold tabular-nums">{rupiah(o.total)}</span>
-                <a href={waLink(o.wa, o.code)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-full bg-leaf px-3.5 py-2 font-display text-sm font-semibold text-cream">
-                  <MessageCircle className="size-4" /> Hubungi
-                </a>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {o.proof ? (
+                    <ActBtn onClick={() => setViewing(o)} icon={<ImageIcon className="size-4" />}>Bukti</ActBtn>
+                  ) : (
+                    (o.status === 'hold' || o.status === 'rejected') && <span className="font-cond text-sm italic text-brown/45">belum upload bukti</span>
+                  )}
+                  {o.status === 'hold' && (
+                    <>
+                      <ActBtn solid onClick={() => void act(o, { status: 'process' })} icon={<Check className="size-4" strokeWidth={3} />}>Verifikasi</ActBtn>
+                      <ActBtn onClick={() => void act(o, { status: 'rejected' })} icon={<X className="size-4" />}>Tolak</ActBtn>
+                    </>
+                  )}
+                  {o.status === 'process' && (
+                    <>
+                      {o.code && (
+                        <a href={waLink(o.wa, codeMessage(o))} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-full bg-leaf px-3.5 py-2 font-display text-sm font-semibold text-cream">
+                          <Send className="size-4" /> Kirim kode
+                        </a>
+                      )}
+                      <ActBtn on={o.sent} onClick={() => void act(o, { sent: !o.sent })} icon={<Check className="size-4" strokeWidth={3} />}>{o.sent ? 'Terkirim' : 'Tandai terkirim'}</ActBtn>
+                      <ActBtn onClick={() => void act(o, { status: 'done' })} icon={<PackageCheck className="size-4" />}>Diambil</ActBtn>
+                    </>
+                  )}
+                  {o.status === 'done' && <ActBtn onClick={() => void act(o, { status: 'process' })} icon={<Undo2 className="size-4" />}>Batal diambil</ActBtn>}
+                  {o.status === 'rejected' && <ActBtn onClick={() => void act(o, { status: 'hold' })} icon={<Undo2 className="size-4" />}>Cek ulang</ActBtn>}
+                  {o.status !== 'process' && (
+                    <a href={waLink(o.wa, contactMessage(o))} target="_blank" rel="noreferrer" aria-label={`WhatsApp ${o.name}`} className="grid size-9 place-items-center rounded-full border-2 border-leaf/40 text-leaf">
+                      <MessageCircle className="size-4" />
+                    </a>
+                  )}
+                </div>
               </motion.li>
             )
           })}
         </ul>
       )}
+      <AnimatePresence>{viewing && <ProofViewer key={viewing.id} order={viewing} load={loadProof} onClose={() => setViewing(null)} />}</AnimatePresence>
     </Card>
+  )
+}
+
+/** the transfer screenshot, fetched with the PIN — the Drive file itself stays private */
+function ProofViewer({ order, load, onClose }: { order: Order; load: (id: string) => Promise<Proof | null>; onClose: () => void }) {
+  const [p, setP] = useState<Proof | null | 'none'>(null)
+  useEffect(() => {
+    void load(order.id).then((r) => setP(r ?? 'none'))
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', esc)
+    return () => window.removeEventListener('keydown', esc)
+  }, [order.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <motion.div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      <motion.div className="flex max-h-full w-full max-w-md flex-col overflow-hidden rounded-3xl bg-cream" onClick={(e) => e.stopPropagation()} initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }} transition={spring.snappy}>
+        <div className="flex items-center justify-between gap-3 p-4">
+          <div className="min-w-0">
+            <p className="truncate font-display font-bold">{order.name} · {rupiah(order.total)}</p>
+            <p className="truncate font-cond text-sm italic text-brown/60">{p && p !== 'none' ? p.name : 'Bukti transfer'}</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Tutup" className="grid size-9 shrink-0 place-items-center rounded-full bg-brown/10"><X className="size-4" /></button>
+        </div>
+        <div className="grid min-h-60 flex-1 place-items-center overflow-auto bg-brown/5">
+          {p === null ? <Loader2 className="size-6 animate-spin text-brown/50" /> : p === 'none' ? <p className="p-6 font-cond italic text-brown/60">Gagal memuat bukti — coba lagi</p> : <img src={p.image} alt={`Bukti transfer ${order.name}`} className="max-h-[70vh] w-full object-contain" />}
+        </div>
+        {p && p !== 'none' && p.url !== '#' && (
+          <a href={p.url} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 p-3 font-display text-sm font-semibold text-terracotta">
+            <ExternalLink className="size-4" /> Buka di Google Drive
+          </a>
+        )}
+      </motion.div>
+    </motion.div>
+  )
+}
+
+function ActBtn({ children, onClick, icon, solid, on }: { children: React.ReactNode; onClick: () => void; icon: React.ReactNode; solid?: boolean; on?: boolean }) {
+  return (
+    <motion.button
+      type="button"
+      whileTap={{ scale: 0.94 }}
+      onClick={onClick}
+      aria-pressed={on}
+      className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 font-display text-sm font-semibold ${solid ? 'bg-brown text-cream' : on ? 'bg-leaf/15 text-leaf ring-2 ring-leaf/40' : 'border-2 border-brown/15 text-brown'}`}
+    >
+      {icon} {children}
+    </motion.button>
   )
 }
 
@@ -477,8 +603,8 @@ const downloadCsv = (rs: Response[]) =>
 const downloadOrders = (os: Order[]) =>
   saveCsv(
     'pletok-preorder',
-    ['Waktu', 'Kode', 'Nama', 'WhatsApp', 'Pesanan', 'Total (Rp)', 'Catatan', 'Status'],
-    os.map((o) => [dayTime(o.at), o.code, o.name, o.wa, o.summary, o.total * 1000, o.note, o.done ? 'selesai' : 'baru']),
+    ['Waktu', 'Kode', 'Kode cek', 'Nama', 'WhatsApp', 'Pesanan', 'Total (Rp)', 'Catatan', 'Status', 'Bayar via', 'Nama rekening pengirim', 'Kode terkirim'],
+    os.map((o) => [dayTime(o.at), o.code, o.ref, o.name, o.wa, o.summary, o.total * 1000, o.note, STATUS_LABEL[o.status], o.pay, o.sender, o.sent ? 'ya' : '']),
   )
 
 function demoResults(): Results {
@@ -509,15 +635,22 @@ function demoResults(): Results {
   const names = ['Nadia', 'Raka', 'Salsa', 'Bima', 'Citra', 'Dimas', 'Aurel', 'Fikri']
   const orders: Order[] = names.map((name, i) => {
     const lines = [PREORDER_ITEMS[i % 6], ...(i % 3 ? [] : [PREORDER_ITEMS[(i + 2) % 6]])].map((it, j) => ({ id: it.id, name: it.name, qty: 1 + ((i + j) % 2), price: it.price }))
+    const status: OrderStatus = (['done', 'done', 'process', 'process', 'process', 'hold', 'hold', 'rejected'] as const)[i]
     return {
       at: open - (30 - i * 3) * 3_600_000,
-      code: `PLT-${String(i + 1).padStart(3, '0')}`,
+      code: status === 'process' || status === 'done' ? pickupCode(name, i + 1) : '',
+      proof: i % 4 === 3 ? '' : '#',
+      id: `demo-${i}`,
+      ref: ['K7Q2MX', 'PA4R8N', 'ZT3WQE', 'M9HD2K', 'C5YB7R', 'W2NJ6T', 'H8EX3P', 'R4VM9G'][i],
+      status,
+      pay: 'BCA',
+      sender: i % 3 === 0 ? `${name.toUpperCase()} PUTRA` : '',
+      sent: i < 3,
       name,
       wa: `0812${String(10000000 + i * 1234567).slice(0, 8)}`,
       summary: lines.map((l) => `${l.qty}× ${l.name}`).join(', '),
       total: lines.reduce((a, l) => a + l.qty * l.price, 0),
       note: i % 4 === 1 ? 'Less sugar ya kak' : '',
-      done: i < 2,
       lines,
     }
   })

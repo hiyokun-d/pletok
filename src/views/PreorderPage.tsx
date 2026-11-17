@@ -3,13 +3,12 @@ import { useEffect, useMemo, useState } from "react";
 import {
   CalendarClock,
   MapPin,
-  MessageCircle,
   Minus,
   Plus,
   ShoppingBag,
   TriangleAlert,
 } from "lucide-react";
-import { ADMIN_NAME, ADMIN_WA, EVENT } from "../data/event";
+import { EVENT } from "../data/event";
 import { ErrorPage } from "./ErrorPage";
 import { DEFAULT_CUTOFF, PREORDER_ITEMS, rupiah } from "../data/preorder";
 import { BACKEND, submitPreorder } from "../lib/backend";
@@ -17,10 +16,15 @@ import { trackClick } from "../lib/analytics";
 import { usePreorder } from "../hooks/usePreorder";
 import { BackButton } from "../components/BackButton";
 import { PaperPlane } from "../components/PaperPlane";
-import { ParticleField } from "../components/ParticleField";
 import { Sprout } from "../components/Sprout";
-import { spring } from "../lib/motion";
 import { useMenu } from "../hooks/useMenu";
+import {
+  AdminContact,
+  FindOrder,
+  MyOrdersList,
+  OrderTracker,
+  useMyOrders,
+} from "../components/OrderTracker";
 
 /** the plane loops at least this long, so a fast answer still reads as "on its way" */
 const MIN_FLIGHT_MS = 1600;
@@ -38,9 +42,11 @@ const dateLong = (ms: number) =>
   });
 
 /**
- * /preorder — pick drinks / bundles, leave a name + WhatsApp, get an order code to show at
- * Meja 9 on the day. What's on sale and the prices come from the Sheet (set on /hasil); the
- * Sheet re-checks everything, so the total here is only a preview.
+ * /preorder — pick drinks / bundles, leave a name + WhatsApp, pay by BCA transfer. The order
+ * waits on hold until an admin finds the transfer on /hasil; then the pickup code shows up
+ * right here (the phone remembers its orders) and the admin sends it on WhatsApp too.
+ * What's on sale and the prices come from the Sheet (set on /config); the Sheet re-checks
+ * everything, so the total here is only a preview.
  */
 export function PreorderPage() {
   const { config, loaded, open } = usePreorder();
@@ -66,17 +72,13 @@ export function PreorderPage() {
   const [note, setNote] = useState("");
   const [hp, setHp] = useState("");
   const [flight, setFlight] = useState<null | "flying" | "away">(null);
-  // a snapshot of what was ordered, so a later config refresh can't change the receipt
-  const [done, setDone] = useState<{
-    code: string;
-    name: string;
-    total: number;
-    saved: number;
-    lines: Array<{ id: string; name: string; qty: number; price: number }>;
-  } | null>(null);
+  // orders made on this phone (with a snapshot of what was ordered) + the one being looked at
+  const mine = useMyOrders();
+  const [trackId, setTrackId] = useState<string | null>(null);
+  const tracked = mine.orders.find((o) => o.id === trackId);
   const [error, setError] = useState<string | null>(null);
   // one id per order attempt, so a retry never makes a second order
-  const [orderId] = useState(newId);
+  const [orderId, setOrderId] = useState(newId);
 
   const lines = items.filter((i) => (qty[i.id] ?? 0) > 0);
   const total = useMemo(
@@ -119,11 +121,15 @@ export function PreorderPage() {
     );
     if (r?.ok) {
       trackClick("preorder-terkirim");
-      setDone({
-        code: r.code,
+      mine.add({
+        id: orderId,
+        at: Date.now(),
         name: name.trim(),
         total: r.total,
         saved,
+        status: r.status,
+        code: "",
+        ref: r.ref,
         lines: lines.map((i) => ({
           id: i.id,
           name: i.name,
@@ -131,6 +137,10 @@ export function PreorderPage() {
           price: i.price,
         })),
       });
+      setTrackId(orderId);
+      // a fresh form for a second order
+      setQty({});
+      setOrderId(newId());
       setFlight("away");
     } else {
       setFlight(null);
@@ -171,63 +181,20 @@ export function PreorderPage() {
                 Mengirim pesananmu…
               </motion.p>
             </motion.section>
-          ) : done ? (
+          ) : tracked ? (
             <motion.section
-              key="done"
-              className="flex min-h-[80dvh] flex-col items-center justify-center text-center"
-              initial={{ opacity: 0, scale: 0.95 }}
+              key={`track-${tracked.id}`}
+              initial={{ opacity: 0, scale: 0.97 }}
               animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0 }}
             >
-              <ParticleField
-                preset="burst"
-                overrides={{ shape: "leaf", count: 80 }}
-                points={[[window.innerWidth / 2, window.innerHeight * 0.3]]}
-                burstKey={1}
+              <OrderTracker
+                order={tracked}
+                config={config}
+                onBack={() => setTrackId(null)}
+                onProof={() => mine.patch(tracked.id, { proof: true })}
+                checkedAt={mine.checkedAt}
               />
-              <h1 className="font-script text-6xl font-bold">Makasih!</h1>
-              <p className="mt-2 font-display text-lg text-brown-soft">
-                Pesananmu sudah masuk. Tunjukkan kode ini di booth:
-              </p>
-              <motion.p
-                className="mt-4 rounded-3xl bg-brown px-8 py-4 font-display text-5xl font-bold tracking-wider text-cream shadow-[0_6px_0_#3a1c0f]"
-                initial={{ scale: 0.6, rotate: -6 }}
-                animate={{ scale: 1, rotate: -2 }}
-                transition={spring.pop}
-              >
-                {done.code}
-              </motion.p>
-              <p className="mt-3 font-display text-lg">
-                atas nama <b>{done.name}</b>
-              </p>
-              <div className="mt-5 w-full max-w-sm rounded-3xl border-2 border-brown/10 bg-cream/80 p-4 text-left">
-                {done.lines.map((i) => (
-                  <p key={i.id} className="flex justify-between font-display">
-                    <span>
-                      {i.qty}× {i.name}
-                    </span>
-                    <span className="tabular-nums">
-                      {rupiah(i.price * i.qty)}
-                    </span>
-                  </p>
-                ))}
-                <p className="mt-2 flex justify-between border-t border-brown/10 pt-2 font-display text-lg font-bold">
-                  <span>Total</span>
-                  <span className="tabular-nums">{rupiah(done.total)}</span>
-                </p>
-                {done.saved > 0 && (
-                  <p className="mt-1 text-right font-display text-sm font-semibold text-leaf">
-                    Kamu hemat {rupiah(done.saved)} dari harga di booth
-                  </p>
-                )}
-              </div>
-              <p className="mt-5 flex items-center gap-2 font-display text-brown-soft">
-                <MapPin className="size-4" /> Ambil di {EVENT.table} ·{" "}
-                {EVENT.dateLabel}, {EVENT.timeLabel}
-              </p>
-              <p className="mt-2 font-cond text-sm italic text-brown/55">
-                Screenshot halaman ini ya — sebutkan kode & nama saat ambil. Tim
-                kami akan menghubungi lewat WhatsApp.
-              </p>
             </motion.section>
           ) : BACKEND && !loaded && stuck ? (
             <motion.section
@@ -262,6 +229,11 @@ export function PreorderPage() {
                 Langsung mampir aja ke {EVENT.table} — {EVENT.dateLabel},{" "}
                 {EVENT.timeLabel}.
               </p>
+              {/* closed for new orders, but earlier ones (and their codes) stay reachable */}
+              <div className="mt-8 flex w-full max-w-md flex-col gap-4 text-left">
+                <MyOrdersList orders={mine.orders} onOpen={setTrackId} />
+                <FindOrder onFound={mine.merge} onOpen={setTrackId} />
+              </div>
             </motion.section>
           ) : (
             <motion.form
@@ -272,6 +244,8 @@ export function PreorderPage() {
               exit={{ opacity: 0, y: -20 }}
               onSubmit={(e) => {
                 e.preventDefault();
+                // "Cek pesanan" sits inside this form; its submit must never place an order
+                if (e.target !== e.currentTarget) return;
                 void submit();
               }}
             >
@@ -291,6 +265,9 @@ export function PreorderPage() {
                 </p>
                 <AdminContact />
               </header>
+
+              <MyOrdersList orders={mine.orders} onOpen={setTrackId} />
+              <FindOrder onFound={mine.merge} onOpen={setTrackId} />
 
               <div className="flex flex-col gap-3">
                 {items.map((i) => {
@@ -389,7 +366,7 @@ export function PreorderPage() {
                 />
                 <p className="font-cond text-sm italic text-brown/55">
                   Nomor WhatsApp cuma dipakai tim Pletok untuk konfirmasi
-                  pesananmu.
+                  pesananmu & kirim kode ambil.
                 </p>
                 <AdminContact className="mt-2" />
               </section>
@@ -434,7 +411,7 @@ export function PreorderPage() {
                       ? "Pilih menu dulu"
                       : !name.trim() || !waOk
                         ? "Isi nama & WhatsApp"
-                        : `Pesan · ${cups} cup`}
+                        : `Lanjut bayar · ${cups} cup`}
                   </span>
                   <span className="tabular-nums">{rupiah(total)}</span>
                 </motion.button>
@@ -471,34 +448,5 @@ function Step({
     >
       {children}
     </motion.button>
-  );
-}
-
-/** "ada pertanyaan?" — the admin's WhatsApp (ADMIN_WA in data/event.ts) */
-function AdminContact({ className = "" }: { className?: string }) {
-  return (
-    <p
-      className={`flex items-start gap-1.5 font-cond text-base italic text-brown-soft ${className}`}
-    >
-      <MessageCircle className="mt-1 size-4 shrink-0" />
-      <span>
-        Ada pertanyaan? WhatsApp admin:{" "}
-        {ADMIN_WA && ADMIN_NAME ? (
-          <a
-            href={`https://wa.me/${ADMIN_WA}`}
-            target="_blank"
-            rel="noreferrer"
-            className="font-semibold not-italic text-leaf underline"
-          >
-            +{ADMIN_WA} {ADMIN_NAME}
-          </a>
-        ) : (
-          <span className="font-semibold">
-            [the developer forgot to change this, pls don't blame him, he's an
-            idiot]
-          </span>
-        )}
-      </span>
-    </p>
   );
 }

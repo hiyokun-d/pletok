@@ -1,6 +1,6 @@
 import { motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
-import { Ban, Check, DoorClosed, Loader2, PackageCheck, RotateCcw, ShieldCheck, ShoppingBag, UtensilsCrossed } from 'lucide-react'
+import { Ban, Check, DoorClosed, Landmark, Loader2, PackageCheck, RotateCcw, ShieldCheck, ShoppingBag, UtensilsCrossed } from 'lucide-react'
 import { EVENT } from '../data/event'
 import { BUNDLES, DRINKS, type DrinkId } from '../data/menu'
 import { DEFAULT_CUTOFF, DEFAULT_PREORDER, PREORDER_ITEMS } from '../data/preorder'
@@ -325,6 +325,7 @@ const normPreorder = (c: PreorderConfig): PreorderConfig => ({
       return [i.id, { on: s.on !== false, price: Math.max(1, Math.min(500, Math.round(s.price || i.price))) }]
     }),
   ),
+  bca: { number: (c.bca?.number ?? '').replace(/[^0-9 -]/g, '').slice(0, 30), holder: (c.bca?.holder ?? '').slice(0, 60) },
 })
 /** <input type="datetime-local"> speaks WIB regardless of the laptop's timezone */
 const toWib = (ms: number) => new Date(ms + 7 * 3_600_000).toISOString().slice(0, 16)
@@ -414,6 +415,32 @@ function PreorderAdmin({ remote, loaded, save }: { remote: PreorderConfig; loade
             className="rounded-xl bg-cream px-2.5 py-2 font-cond text-sm outline-none focus:ring-2 focus:ring-terracotta"
           />
         </label>
+      </div>
+
+      {/* where customers transfer to — shown on their payment screen after ordering */}
+      <div
+        className={`mt-3 grid gap-2 rounded-2xl bg-cream-deep/60 p-4 sm:grid-cols-[auto_1fr_1fr] sm:items-center ${loaded ? '' : 'pointer-events-none opacity-50'}`}
+        style={dirty((c) => c.bca) ? { boxShadow: `inset 0 0 0 2px ${WAIT}` } : undefined}
+      >
+        <span>
+          <span className="flex items-center gap-1.5 font-display font-semibold"><Landmark className="size-4 text-terracotta" /> Rekening BCA</span>
+          <span className="font-cond text-sm italic text-brown/60">QRIS menyusul</span>
+        </span>
+        <input
+          value={cfg.bca?.number ?? ''}
+          onChange={(e) => edit((c) => ({ ...c, bca: { number: e.target.value, holder: c.bca?.holder ?? '' } }))}
+          inputMode="numeric"
+          placeholder="Nomor rekening"
+          aria-label="Nomor rekening BCA"
+          className="rounded-xl bg-cream px-3 py-2 font-display font-semibold tabular-nums outline-none focus:ring-2 focus:ring-terracotta"
+        />
+        <input
+          value={cfg.bca?.holder ?? ''}
+          onChange={(e) => edit((c) => ({ ...c, bca: { number: c.bca?.number ?? '', holder: e.target.value } }))}
+          placeholder="Atas nama"
+          aria-label="Atas nama rekening"
+          className="rounded-xl bg-cream px-3 py-2 font-display outline-none focus:ring-2 focus:ring-terracotta"
+        />
       </div>
 
       <div className={`mt-3 flex flex-wrap items-center gap-2 rounded-2xl bg-cream-deep/60 p-3 font-cond ${loaded ? '' : 'pointer-events-none opacity-50'}`}>

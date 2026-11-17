@@ -5,6 +5,11 @@
  *   POST {type:'feedback', ...}  → a row in "Feedback"     (anyone)
  *   POST {type:'scan', target}   → a row in "Scans"        (anyone)
  *   POST {type:'menu', pin, state} → saves the sold-out state (crew PIN only)
+ *   POST {type:'preorder', ...}  → a row in "Preorder", on hold (no pickup code yet) + a kode cek
+ *   POST {type:'preorder-lookup', ids} / {type:'preorder-find', ref | wa+name} → the customer's own orders
+ *   POST {type:'preorder-status', pin, id, status?, sent?} → verify (hands out e.g. elisha-007), picked up, rejected
+ *   POST {type:'preorder-proof', id, image} → the transfer screenshot into Drive, named after the customer
+ *   POST {type:'preorder-proof-get', pin, id} → that screenshot, for /hasil
  *   GET  ?stats=1                → numbers for the closing screen + current menu state
  *
  * Exports: the data is just a Sheet — File → Download (.xlsx / .csv / .pdf), or
@@ -16,7 +21,74 @@ const SCAN_COLS = ['Waktu', 'Tujuan', 'Perangkat']
 const DRINK_NAMES = { original: 'Original', lychee: 'Lychee Sparkling', yakult: 'Yakult' }
 
 /* ---- pre-order: the Sheet is the source of truth for what's on sale and what it costs */
-const ORDER_COLS = ['Waktu', 'Kode', 'ID', 'Nama', 'WhatsApp', 'Pesanan', 'Total (Rp)', 'Catatan', 'Status', 'Detail (JSON)']
+const ORDER_COLS = ['Waktu', 'Kode', 'ID', 'Nama', 'WhatsApp', 'Pesanan', 'Total (Rp)', 'Catatan', 'Status', 'Detail (JSON)', 'Bayar via', 'Nama rekening pengirim', 'Kode terkirim', 'Kode cek', 'Bukti transfer']
+// an order waits ("hold") until an admin finds the transfer, then gets its pickup code ("process").
+// The Status column keeps words a person reading the Sheet understands.
+const STATUS = { hold: 'menunggu verifikasi', process: 'diproses', done: 'selesai', rejected: 'ditolak' }
+const statusOf_ = (v) => {
+  const t = String(v)
+  if (t === 'baru') return 'process' // before verification existed, every order got its code straight away
+  const k = Object.keys(STATUS).filter((k) => STATUS[k] === t)[0]
+  return k || 'hold'
+}
+// a column added later: write its header into an older sheet
+function orderSheet_() {
+  const sh = sheet_('Preorder', ORDER_COLS)
+  if (sh.getLastColumn() < ORDER_COLS.length) {
+    sh.getRange(1, 1, 1, ORDER_COLS.length).setValues([ORDER_COLS]).setFontWeight('bold').setBackground('#5a2e1a').setFontColor('#f5ebdd')
+  }
+  return sh
+}
+const orderRows_ = (sh) => (sh.getLastRow() < 2 ? [] : sh.getRange(2, 1, sh.getLastRow() - 1, ORDER_COLS.length).getValues())
+// the private "kode cek" a customer types on any phone to find their order — random, unlike the
+// pickup code (PLT-001, PLT-002… is easy to guess, so it never unlocks anything by itself)
+const REF_ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+function newRef_(rows) {
+  const used = rows.map((r) => String(r[13]))
+  for (;;) {
+    let ref = ''
+    for (let i = 0; i < 6; i++) ref += REF_ABC.charAt(Math.floor(Math.random() * REF_ABC.length))
+    if (used.indexOf(ref) === -1) return ref
+  }
+}
+const digits_ = (wa) => {
+  const d = String(wa).replace(/\D/g, '')
+  return d.startsWith('62') ? '0' + d.slice(2) : d.startsWith('8') ? '0' + d : d
+}
+const loose_ = (t) => String(t).toLowerCase().replace(/[^a-z0-9]/g, '')
+// what the customer's phone may know about an order: the pickup code only once it's paid
+function orderPublic_(r) {
+  const st = statusOf_(r[8])
+  return { id: String(r[2]), ref: String(r[13] || ''), status: st, code: st === 'process' || st === 'done' ? String(r[1]) : '', total: Number(r[6]) / 1000, name: String(r[3]), at: new Date(r[0]).getTime(), lines: JSON.parse(String(r[9]) || '[]'), proof: !!r[14] }
+}
+// next pickup code: the customer's first name + a running number, lowercase — "elisha-007".
+// The number counts every code ever given (old PLT-xxx too), so it never repeats.
+const nextCode_ = (rows, name) => {
+  const n = rows.reduce((m, r) => Math.max(m, Number((String(r[1]).match(/(\d+)$/) || [])[1]) || 0), 0) + 1
+  const first = String(name).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/\s+/)[0].replace(/[^a-z0-9]/g, '').slice(0, 12) || 'pletok'
+  return first + '-' + ('00' + n).slice(-3)
+}
+
+/* ---- proof of transfer: screenshots go into one Drive folder, renamed after the customer */
+function proofFolder_() {
+  const props = PropertiesService.getScriptProperties()
+  const id = props.getProperty('PROOF_FOLDER')
+  if (id) {
+    try {
+      return DriveApp.getFolderById(id)
+    } catch (e) {
+      /* deleted — make a new one */
+    }
+  }
+  const f = DriveApp.createFolder('Pletok · Bukti transfer pre-order')
+  props.setProperty('PROOF_FOLDER', f.getId())
+  return f
+}
+/** run once from the editor (▶ Run → setupProofFolder): asks for Drive permission and makes the folder */
+function setupProofFolder() {
+  Logger.log('Folder bukti transfer: ' + proofFolder_().getUrl())
+}
+const fileId_ = (url) => (String(url).match(/[-\w]{25,}/) || [''])[0]
 // prices in thousands (18 = Rp18.000); the admin can change them on /hasil
 const PREORDER_ITEMS = {
   original: { name: 'Pletok Original', price: 18 },
@@ -38,7 +110,8 @@ function preorderConfig_() {
     const s = (saved.items || {})[id] || {}
     items[id] = { on: s.on !== false, price: Number(s.price) > 0 ? Number(s.price) : PREORDER_ITEMS[id].price }
   })
-  return { enabled: !!saved.enabled, cutoff: Math.min(Number(saved.cutoff) || PREORDER_CUTOFF, PREORDER_CUTOFF), items: items }
+  const bca = saved.bca || {}
+  return { enabled: !!saved.enabled, cutoff: Math.min(Number(saved.cutoff) || PREORDER_CUTOFF, PREORDER_CUTOFF), items: items, bca: { number: String(bca.number || ''), holder: String(bca.holder || '') } }
 }
 
 
@@ -104,7 +177,7 @@ function doPost(e) {
 
     // a customer's pre-order — everything re-checked here, the phone only says what and how many
     if (b.type === 'preorder') {
-      if (b.hp) return json_({ ok: true, code: 'PLT-000' })
+      if (b.hp) return json_({ ok: true, status: 'hold', total: 0 })
       const cfg = preorderConfig_()
       if (!cfg.enabled || Date.now() > cfg.cutoff) return json_({ ok: false, error: 'closed' })
       const name = clip_(b.name, 80).trim()
@@ -121,17 +194,39 @@ function doPost(e) {
       })
       if (!lines.length) return json_({ ok: false, error: 'empty' })
 
-      const sh = sheet_('Preorder', ORDER_COLS)
-      const last = sh.getLastRow()
-      // a retry of the same order gets its first code back instead of a duplicate
-      if (last > 1) {
-        const ids = sh.getRange(2, 3, last - 1, 1).getValues().flat()
-        const i = ids.indexOf(b.id)
-        if (i !== -1) return json_({ ok: true, code: sh.getRange(i + 2, 2).getValue(), total: Number(sh.getRange(i + 2, 7).getValue()) / 1000 })
+      const sh = orderSheet_()
+      // a retry of the same order gets the first one back instead of a duplicate
+      const rows = orderRows_(sh)
+      const prev = rows.filter((r) => r[2] === b.id)[0]
+      if (prev) return json_({ ok: true, status: statusOf_(prev[8]), total: Number(prev[6]) / 1000, ref: String(prev[13] || '') })
+      // no pickup code yet: it waits on hold until an admin finds the transfer
+      const ref = newRef_(rows)
+      sh.appendRow([now, '', clip_(b.id, 64), name, "'" + wa, lines.map((l) => l.qty + '× ' + l.name).join(', '), total * 1000, clip_(b.note, 300), STATUS.hold, JSON.stringify(lines), 'BCA', clip_(b.sender, 80), '', ref])
+      return json_({ ok: true, status: 'hold', total: total, ref: ref })
+    }
+
+    // the customer's phone asks how its orders are doing — by the private order id only;
+    // the pickup code is only handed out once the payment is verified
+    if (b.type === 'preorder-lookup') {
+      const ids = (b.ids || []).slice(0, 10).map(String)
+      const rows = orderRows_(orderSheet_()).filter((r) => ids.indexOf(String(r[2])) !== -1)
+      return json_({ ok: true, orders: rows.map(orderPublic_) })
+    }
+
+    // "Cek pesanan" from any phone: the kode cek or the pickup code alone, or WhatsApp number + name together
+    if (b.type === 'preorder-find') {
+      const rows = orderRows_(orderSheet_())
+      const typed = String(b.ref || '').trim()
+      const ref = typed.toUpperCase().replace(/[^A-Z0-9]/g, '')
+      let hits = []
+      if (typed) hits = rows.filter((r) => String(r[13]) === ref || (String(r[1]) && String(r[1]).toLowerCase() === typed.toLowerCase()))
+      else {
+        const wa = digits_(b.wa || '')
+        const name = loose_(b.name || '')
+        if (wa.length < 9 || !name) return json_({ ok: false, error: 'input' })
+        hits = rows.filter((r) => digits_(r[4]) === wa && loose_(r[3]) === name)
       }
-      const code = 'PLT-' + ('00' + last).slice(-3)
-      sh.appendRow([now, code, clip_(b.id, 64), name, "'" + wa, lines.map((l) => l.qty + '× ' + l.name).join(', '), total * 1000, clip_(b.note, 300), 'baru', JSON.stringify(lines)])
-      return json_({ ok: true, code: code, total: total })
+      return json_({ ok: true, orders: hits.slice(-5).map(orderPublic_) })
     }
 
     // admin (/hasil): what's on sale, prices, open/closed, cut-off
@@ -143,21 +238,69 @@ function doPost(e) {
         const s = (c.items || {})[id] || {}
         items[id] = { on: s.on !== false, price: Math.max(1, Math.min(500, Math.round(Number(s.price) || PREORDER_ITEMS[id].price))) }
       })
-      props.setProperty('PREORDER', JSON.stringify({ enabled: !!c.enabled, cutoff: Math.min(Number(c.cutoff) || PREORDER_CUTOFF, PREORDER_CUTOFF), items: items }))
+      const bca = c.bca || {}
+      props.setProperty('PREORDER', JSON.stringify({ enabled: !!c.enabled, cutoff: Math.min(Number(c.cutoff) || PREORDER_CUTOFF, PREORDER_CUTOFF), items: items, bca: { number: clip_(bca.number, 30).replace(/[^0-9 -]/g, ''), holder: clip_(bca.holder, 60) } }))
       CacheService.getScriptCache().remove('stats')
       return json_({ ok: true })
     }
 
-    // admin: mark an order done / not done
+    // admin (/hasil): verify (hold → process, hands out the pickup code), picked up, rejected,
+    // and "code sent on WhatsApp" — the order is found by its id
     if (b.type === 'preorder-status') {
       if (!b.pin || b.pin !== props.getProperty('CREW_PIN')) return json_({ ok: false, error: 'pin' })
-      const sh = sheet_('Preorder', ORDER_COLS)
-      if (sh.getLastRow() < 2) return json_({ ok: false, error: 'code' })
-      const codes = sh.getRange(2, 2, sh.getLastRow() - 1, 1).getValues().flat()
-      const i = codes.indexOf(b.code)
-      if (i === -1) return json_({ ok: false, error: 'code' })
-      sh.getRange(i + 2, 9).setValue(b.done ? 'selesai' : 'baru')
+      const sh = orderSheet_()
+      const rows = orderRows_(sh)
+      const i = rows.map((r) => String(r[2])).indexOf(String(b.id))
+      if (i === -1) return json_({ ok: false, error: 'id' })
+      let code = String(rows[i][1])
+      if (b.status) {
+        if (!STATUS[b.status]) return json_({ ok: false, error: 'status' })
+        if ((b.status === 'process' || b.status === 'done') && !code) {
+          code = nextCode_(rows, rows[i][3])
+          sh.getRange(i + 2, 2).setValue(code)
+        }
+        sh.getRange(i + 2, 9).setValue(STATUS[b.status])
+      }
+      if (typeof b.sent === 'boolean') sh.getRange(i + 2, 13).setValue(b.sent ? 'ya' : '')
+      return json_({ ok: true, code: code })
+    }
+
+    // the customer's transfer screenshot (from the hold screen): saved in Drive as "Nama (KODECEK) waktu.jpg"
+    if (b.type === 'preorder-proof') {
+      const sh = orderSheet_()
+      const rows = orderRows_(sh)
+      const i = rows.map((r) => String(r[2])).indexOf(String(b.id))
+      if (i === -1) return json_({ ok: false, error: 'id' })
+      const m = String(b.image || '').match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/)
+      if (!m) return json_({ ok: false, error: 'image' })
+      const bytes = Utilities.base64Decode(m[2])
+      if (bytes.length > 6 * 1024 * 1024) return json_({ ok: false, error: 'size' })
+      const r = rows[i]
+      const stamp = Utilities.formatDate(now, 'Asia/Jakarta', 'yyyy-MM-dd HH.mm')
+      const ext = m[1] === 'image/png' ? 'png' : m[1] === 'image/webp' ? 'webp' : 'jpg'
+      const clean = String(r[3]).replace(/[\\/:*?"<>|]/g, '').trim() || 'Tanpa nama'
+      const file = proofFolder_().createFile(Utilities.newBlob(bytes, m[1], clean + ' (' + (r[13] || 'pre-order') + ') ' + stamp + '.' + ext))
+      // a new screenshot replaces the old one
+      const old = fileId_(r[14])
+      if (old) {
+        try {
+          DriveApp.getFileById(old).setTrashed(true)
+        } catch (e) {
+          /* already gone */
+        }
+      }
+      sh.getRange(i + 2, 15).setValue(file.getUrl())
       return json_({ ok: true })
+    }
+
+    // admin (/hasil): show a screenshot without sharing the Drive file with anyone
+    if (b.type === 'preorder-proof-get') {
+      if (!b.pin || b.pin !== props.getProperty('CREW_PIN')) return json_({ ok: false, error: 'pin' })
+      const r = orderRows_(orderSheet_()).filter((x) => String(x[2]) === String(b.id))[0]
+      const id = r && fileId_(r[14])
+      if (!id) return json_({ ok: false, error: 'none' })
+      const blob = DriveApp.getFileById(id).getBlob()
+      return json_({ ok: true, image: 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes()), name: blob.getName(), url: r[14] })
     }
 
     if (b.type === 'pin') return json_({ ok: b.pin === props.getProperty('CREW_PIN') })
@@ -179,14 +322,11 @@ function doPost(e) {
           name: String(r[8]), contact: String(r[9]), consent: r[10] === 'ya', source: String(r[11]),
         })),
         scans: scans.map((r) => ({ at: new Date(r[0]).getTime(), target: String(r[1]) })),
-        orders: (() => {
-          const po = sheet_('Preorder', ORDER_COLS)
-          if (po.getLastRow() < 2) return []
-          return po.getRange(2, 1, po.getLastRow() - 1, ORDER_COLS.length).getValues().map((r) => ({
-            at: new Date(r[0]).getTime(), code: String(r[1]), name: String(r[3]), wa: String(r[4]), summary: String(r[5]),
-            total: Number(r[6]) / 1000, note: String(r[7]), done: r[8] === 'selesai', lines: JSON.parse(String(r[9]) || '[]'),
-          }))
-        })(),
+        orders: orderRows_(orderSheet_()).map((r) => ({
+          at: new Date(r[0]).getTime(), code: String(r[1]), id: String(r[2]), name: String(r[3]), wa: String(r[4]), summary: String(r[5]),
+          total: Number(r[6]) / 1000, note: String(r[7]), status: statusOf_(r[8]), lines: JSON.parse(String(r[9]) || '[]'),
+          pay: String(r[10] || 'BCA'), sender: String(r[11] || ''), sent: r[12] === 'ya', ref: String(r[13] || ''), proof: String(r[14] || ''),
+        })),
       })
     }
     return json_({ ok: false, error: 'type' })

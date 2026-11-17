@@ -161,17 +161,46 @@ export interface PreorderConfig {
   /** epoch ms; orders close after this (default: end of 24 Nov WIB, H-1) */
   cutoff: number
   items: Record<string, { on: boolean; price: number }>
+  /** where customers transfer to — set on /config */
+  bca?: { number: string; holder: string }
 }
+/** hold = waiting for an admin to find the transfer · process = verified, has its pickup code */
+export type OrderStatus = 'hold' | 'process' | 'done' | 'rejected'
 export interface Order {
   at: number
+  /** pickup code — empty until verified */
   code: string
+  id: string
   name: string
   wa: string
   summary: string
   total: number
   note: string
-  done: boolean
+  status: OrderStatus
   lines: Array<{ id: string; name: string; qty: number; price: number }>
+  pay: string
+  /** name on the sender's bank account, to match the transfer */
+  sender: string
+  /** an admin sent the code on WhatsApp */
+  sent: boolean
+  /** the customer's private "kode cek" for finding the order on any phone */
+  ref: string
+  /** Drive link of the transfer screenshot ('' = none yet) */
+  proof: string
+}
+/** what a customer's phone gets back about its own order */
+export interface PublicOrder {
+  id: string
+  ref: string
+  status: OrderStatus
+  /** empty until paid */
+  code: string
+  total: number
+  name: string
+  at: number
+  lines: Array<{ id: string; name: string; qty: number; price: number }>
+  /** a transfer screenshot is uploaded */
+  proof: boolean
 }
 
 /** a POST whose answer we need (the order code) — retried a few times on a flaky connection */
@@ -189,7 +218,31 @@ async function postJson<T>(p: Payload, tries = 3): Promise<(T & { ok: boolean; e
 }
 
 export function submitPreorder(order: { id: string; items: Array<{ id: string; qty: number }>; name: string; wa: string; note: string; hp: string }) {
-  return postJson<{ code: string; total: number }>({ type: 'preorder', ...order })
+  return postJson<{ status: OrderStatus; total: number; ref: string }>({ type: 'preorder', ...order })
+}
+
+/** the customer's own orders, by their private ids — the code only comes back once verified */
+export async function lookupOrders(ids: string[]) {
+  const r = await postJson<{ orders: PublicOrder[] }>({ type: 'preorder-lookup', ids }, 1)
+  return r?.ok ? r.orders : null
+}
+
+/** the transfer screenshot (already shrunk to a JPEG data URL) — the Sheet names it after the customer */
+export async function uploadProof(id: string, image: string): Promise<boolean> {
+  const r = await postJson({ type: 'preorder-proof', id, image }, 2)
+  return !!r?.ok
+}
+
+/** admin: the screenshot itself, fetched with the PIN (the Drive file stays private) */
+export async function fetchProof(pin: string, id: string) {
+  const r = await postJson<{ image: string; name: string; url: string }>({ type: 'preorder-proof-get', pin, id }, 2)
+  return r?.ok ? r : null
+}
+
+/** "Cek pesanan" on any phone: the kode cek or pickup code alone, or WhatsApp number + name */
+export async function findOrders(q: { ref: string } | { wa: string; name: string }) {
+  const r = await postJson<{ orders: PublicOrder[] }>({ type: 'preorder-find', ...q })
+  return r?.ok ? r.orders : null
 }
 
 export async function savePreorderConfig(pin: string, config: PreorderConfig): Promise<boolean> {
@@ -198,8 +251,9 @@ export async function savePreorderConfig(pin: string, config: PreorderConfig): P
   return !!r?.ok
 }
 
-export async function setOrderDone(pin: string, code: string, done: boolean): Promise<boolean> {
-  const r = await postJson({ type: 'preorder-status', pin, code, done })
+/** admin: move an order along (verifying hands out its code) and/or mark the code as sent */
+export async function updateOrder(pin: string, id: string, patch: { status?: OrderStatus; sent?: boolean }): Promise<boolean> {
+  const r = await postJson({ type: 'preorder-status', pin, id, ...patch })
   return !!r?.ok
 }
 
