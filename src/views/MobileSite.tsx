@@ -2,7 +2,8 @@ import { motion, useScroll, useSpring, useTransform } from 'motion/react'
 import { useRef } from 'react'
 import { CalendarDays, Clock, MapPin, Sparkles } from 'lucide-react'
 import { InstagramIcon } from '../components/InstagramIcon'
-import { BUNDLES, DRINKS, TAGLINE } from '../data/menu'
+import { DRINKS, TAGLINE } from '../data/menu'
+import { useMenu } from '../hooks/useMenu'
 import { SOURCES, STORY } from '../data/story'
 import { EVENT, INSTAGRAM_HANDLE, INSTAGRAM_URL } from '../data/event'
 import { useEventPhase } from '../hooks/useEventPhase'
@@ -35,6 +36,7 @@ function SectionTitle({ kicker, title }: { kicker: string; title: string }) {
 }
 
 export function MobileSite({ onEgg }: { onEgg: () => void }) {
+  const menu = useMenu()
   const { phase } = useEventPhase()
   const heroRef = useRef<HTMLElement>(null)
   const storyRef = useRef<HTMLElement>(null)
@@ -163,8 +165,8 @@ export function MobileSite({ onEgg }: { onEgg: () => void }) {
       <section className="relative z-10 mx-auto w-full max-w-lg px-5 py-12">
         <SectionTitle kicker="Pilih rasamu" title="Menu" />
         <div className="flex flex-col gap-8">
-          {DRINKS.map((d, i) => (
-            <CupCard key={d.id} drink={d} index={i} />
+          {menu.drinks.map((d, i) => (
+            <CupCard key={d.id} drink={d} index={i} soldOut={d.soldOut} />
           ))}
         </div>
       </section>
@@ -173,8 +175,8 @@ export function MobileSite({ onEgg }: { onEgg: () => void }) {
       <section className="relative z-10 mx-auto w-full max-w-lg px-5 py-12">
         <SectionTitle kicker="Lebih hemat" title="Promo Bundling" />
         <div className="flex flex-col gap-6">
-          {BUNDLES.map((b, i) => (
-            <BundleCard key={b.name} bundle={b} index={i} />
+          {menu.bundles.map((b, i) => (
+            <BundleCard key={b.name} bundle={b} index={i} soldOut={b.soldOut} />
           ))}
         </div>
       </section>

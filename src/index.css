@@ -89,3 +89,8 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-brown);
 }
+
+/* A + T shakes #root; a transformed parent becomes the box for its fixed children, so it must span the viewport */
+#root {
+  min-height: 100dvh;
+}

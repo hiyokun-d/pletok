@@ -1,9 +1,9 @@
-import { motion, useAnimate } from 'motion/react'
-import { useEffect, useMemo, useState } from 'react'
-import { Heart, RotateCcw } from 'lucide-react'
+import { animate as animateValue, motion, useAnimate } from 'motion/react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Eye, Heart, MessageCircleHeart, RotateCcw, ScanLine, Star, Users } from 'lucide-react'
 import { DRINKS } from '../data/menu'
 import { LEAF_BOX, LETTERS, LOGO_BOX, TAGLINE, pct } from '../data/logo'
-import { EVENT, FEEDBACK_READY, FEEDBACK_URL, INSTAGRAM_HANDLE, INSTAGRAM_URL } from '../data/event'
+import { EVENT, INSTAGRAM_HANDLE, INSTAGRAM_URL, QR_LINKS } from '../data/event'
 import { ParticleField } from '../components/ParticleField'
 import { QrCanvas } from '../components/QrCanvas'
 import { FeedbackButton } from '../components/FeedbackButton'
@@ -12,6 +12,9 @@ import { LogoPiece } from '../components/LogoPiece'
 import { Sprout } from '../components/Sprout'
 import { useViewport } from '../hooks/useViewport'
 import { ease, spring } from '../lib/motion'
+import { useLiveStats } from '../lib/liveStats'
+import { useMenu } from '../hooks/useMenu'
+import { useFeedbackOpen } from '../hooks/useFeedbackOpen'
 
 type Stage = 'calm' | 'storm' | 'zoom' | 'brown'
 
@@ -72,6 +75,7 @@ export function ClosingSequence({ desktop }: { desktop: boolean }) {
   const [scope, animate] = useAnimate()
   const { w, h } = useViewport()
   const [stage, setStage] = useState<Stage>('calm')
+  const feedback = useFeedbackOpen().open
   const [run, setRun] = useState(0)
   const [burstKey, setBurstKey] = useState<number>()
   const storm = useStorm(w, h, desktop)
@@ -220,7 +224,7 @@ export function ClosingSequence({ desktop }: { desktop: boolean }) {
               animate={{ opacity: 1, y: 0 }}
               transition={{ ...spring.glide, delay: 1.5 }}
             >
-              Pletok sudah tutup untuk {EVENT.name} hari ini. Sampai jumpa lagi — tradisi abadi, jiwa muda.
+              Makasih banyak buat semua yang sudah mampir, nyobain, dan ramein {EVENT.table} — juga panitia {EVENT.name}! Sampai jumpa lagi — tradisi abadi, jiwa muda.
             </motion.p>
             <motion.div
               className="mt-[3vh] flex flex-wrap items-center justify-center gap-3"
@@ -235,6 +239,8 @@ export function ClosingSequence({ desktop }: { desktop: boolean }) {
             </motion.div>
           </div>
 
+          {desktop && <DayStats />}
+
           {desktop && (
             <motion.div
               className="absolute bottom-[4vh] right-[2.5vw] flex flex-col items-center gap-2 rounded-[1.75rem] bg-cream p-4 shadow-[0_24px_60px_-20px_rgb(0_0_0/0.5)]"
@@ -242,17 +248,17 @@ export function ClosingSequence({ desktop }: { desktop: boolean }) {
               animate={{ opacity: 1, scale: 1, rotate: 0 }}
               transition={{ ...spring.pop, delay: 2 }}
             >
-              <QrCanvas value={FEEDBACK_URL} className="size-[min(22vh,200px)]" />
+              <QrCanvas value={QR_LINKS} className="size-[min(22vh,200px)]" />
               <p className="flex items-center gap-1.5 font-display text-lg font-bold text-brown">
                 Masih sempat! <Heart className="size-4 fill-lychee text-lychee" />
               </p>
-              <p className="-mt-1 font-cond text-sm italic text-brown-soft">{FEEDBACK_READY ? 'Scan untuk kasih feedback' : 'Scan untuk follow Pletok'}</p>
+              <p className="-mt-1 font-cond text-sm italic text-brown-soft">{feedback ? 'Scan · feedback & Instagram' : 'Scan · follow Pletok'}</p>
             </motion.div>
           )}
 
           <motion.button
             onClick={() => setRun((r) => r + 1)}
-            className="absolute bottom-[4vh] left-[2.5vw] flex items-center gap-2 rounded-full px-3 py-2 font-cond text-sm font-semibold italic text-cream/50 hover:text-cream"
+            className={`absolute left-[2.5vw] flex items-center gap-2 rounded-full px-3 py-2 font-cond text-sm font-semibold italic text-cream/50 hover:text-cream ${desktop ? 'top-[3vh]' : 'bottom-[4vh]'}`}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 3 }}
@@ -262,6 +268,91 @@ export function ClosingSequence({ desktop }: { desktop: boolean }) {
           </motion.button>
         </>
       )}
+    </motion.div>
+  )
+}
+
+/* ------------------------------------------------------------------ the day in numbers */
+
+/** counts from 0 to `to` once it appears */
+function CountUp({ to, delay, decimals = 0 }: { to: number; delay: number; decimals?: number }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const c = animateValue(0, to, {
+      duration: Math.min(2.2, 0.8 + to / 120),
+      delay,
+      ease: ease.out,
+      onUpdate: (v) => (el.textContent = v.toLocaleString('id-ID', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })),
+    })
+    return () => c.stop()
+  }, [to, delay, decimals])
+  return <span ref={ref}>0</span>
+}
+
+const clock = (ms: number) => new Date(ms).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit' })
+
+/**
+ * The real numbers of the day: scans, feedback, favourite drink (lib/liveStats — placeholder
+ * until the backend exists) and the sell-out order, which the booth already knows.
+ */
+function DayStats() {
+  const { connected, stats } = useLiveStats()
+  const { drinks } = useMenu()
+  const soldOrder = drinks.filter((d) => d.soldAt).sort((a, b) => a.soldAt! - b.soldAt!)
+  // ties show every leader: "Original & Yakult"
+  const favNames = drinks.filter((d) => stats.favorites.includes(d.id)).map((d) => d.short)
+  const fav = favNames.length ? favNames.join(' & ') : undefined
+  const rows: Array<{ Icon: typeof Eye; label: string; n: number | null; decimals?: number; text?: string }> = [
+    { Icon: ScanLine, label: 'scan QR booth', n: stats.scans },
+    { Icon: MessageCircleHeart, label: 'feedback masuk', n: stats.feedbacks },
+    { Icon: Users, label: 'mau dihubungi lagi', n: stats.contacts },
+    { Icon: Star, label: 'rating rata-rata', n: stats.rating, decimals: 1 },
+    { Icon: Heart, label: favNames.length > 1 ? 'menu favorit (seri)' : 'menu favorit', n: null, text: fav },
+  ]
+  return (
+    <motion.div
+      className="absolute bottom-[4vh] left-[2.5vw] w-[min(25vw,340px)] rounded-[1.75rem] bg-cream/[0.08] p-[2.2vh] text-cream ring-1 ring-cream/15"
+      initial={{ opacity: 0, x: -40 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ ...spring.glide, delay: 2.2 }}
+    >
+      <p className="font-cond text-[clamp(0.7rem,1.6vh,0.95rem)] font-semibold uppercase italic tracking-[0.3em] text-yakult">Hari ini di {EVENT.table}</p>
+      <ul className="mt-[1.2vh] flex flex-col gap-[0.9vh]">
+        {rows.map(({ Icon, label, n, decimals, text }, i) => (
+          <motion.li
+            key={label}
+            className="flex items-center gap-[1.2vh]"
+            initial={{ opacity: 0, x: -16 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ ...spring.snappy, delay: 2.4 + i * 0.1 }}
+          >
+            <span className="grid size-[3.4vh] shrink-0 place-items-center rounded-xl bg-cream/10">
+              <Icon className="size-[55%] text-yakult" />
+            </span>
+            <span className="flex min-w-0 flex-1 items-baseline justify-between gap-2 leading-tight">
+              <span className="font-display text-[clamp(0.75rem,1.75vh,1rem)] text-cream/75">{label}</span>
+              {text ? (
+                // a tie ("Original & Yakult") wraps instead of pushing the card wider
+                <span className={`text-right font-display font-bold leading-tight ${text.includes('&') ? 'text-[clamp(0.85rem,1.9vh,1.15rem)]' : 'text-[clamp(1rem,2.4vh,1.5rem)]'}`}>{text}</span>
+              ) : n !== null ? (
+                <span className="font-display text-[clamp(1rem,2.4vh,1.5rem)] font-bold tabular-nums">
+                  <CountUp to={n} decimals={decimals} delay={2.5 + i * 0.1} />
+                </span>
+              ) : (
+                <span className="rounded-full bg-cream/10 px-2 py-0.5 font-cond text-[clamp(0.65rem,1.4vh,0.85rem)] italic text-cream/50">segera</span>
+              )}
+            </span>
+          </motion.li>
+        ))}
+      </ul>
+      {soldOrder.length > 0 && (
+        <p className="mt-[1.2vh] border-t border-cream/10 pt-[1vh] font-display text-[clamp(0.75rem,1.7vh,1rem)] text-cream/80">
+          <span className="font-semibold text-yakult">Habis duluan:</span> {soldOrder.map((d) => `${d.short} (${clock(d.soldAt!)})`).join(' → ')}
+        </p>
+      )}
+      {!connected && <p className="mt-[1vh] font-cond text-[clamp(0.65rem,1.4vh,0.85rem)] italic text-cream/45">Angka live muncul setelah Google Sheet tersambung.</p>}
     </motion.div>
   )
 }

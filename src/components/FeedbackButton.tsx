@@ -1,10 +1,16 @@
 import { motion, useMotionValue, useSpring } from 'motion/react'
 import { MessageCircleHeart, ArrowUpRight } from 'lucide-react'
 import type { PointerEvent } from 'react'
-import { FEEDBACK_READY, FEEDBACK_URL } from '../data/event'
+import { FEEDBACK_URL } from '../data/event'
+import { useFeedbackOpen } from '../hooks/useFeedbackOpen'
 
 /** Magnetic pill: follows the pointer a little, shine sweeps across, icon wiggles. */
-export function FeedbackButton({ className = '', compact = false }: { className?: string; compact?: boolean }) {
+/** hidden while the feedback form is closed (before opening / 25 min after closing) */
+export function FeedbackButton(props: { className?: string; compact?: boolean }) {
+  return useFeedbackOpen().open ? <MagneticFeedback {...props} /> : null
+}
+
+function MagneticFeedback({ className = '', compact = false }: { className?: string; compact?: boolean }) {
   const x = useSpring(useMotionValue(0), { stiffness: 300, damping: 18 })
   const y = useSpring(useMotionValue(0), { stiffness: 300, damping: 18 })
 
@@ -21,8 +27,6 @@ export function FeedbackButton({ className = '', compact = false }: { className?
   return (
     <motion.a
       href={FEEDBACK_URL}
-      target="_blank"
-      rel="noreferrer"
       style={{ x, y }}
       onPointerMove={onMove}
       onPointerLeave={reset}
@@ -46,9 +50,6 @@ export function FeedbackButton({ className = '', compact = false }: { className?
         <MessageCircleHeart className={compact ? 'size-4' : 'size-5'} />
       </motion.span>
       <span>Kasih Feedback</span>
-      {!FEEDBACK_READY && (
-        <span className="rounded-full bg-terracotta px-2 py-0.5 font-cond text-[0.65rem] font-semibold uppercase italic tracking-wider">segera</span>
-      )}
       <ArrowUpRight className="size-4 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
     </motion.a>
   )

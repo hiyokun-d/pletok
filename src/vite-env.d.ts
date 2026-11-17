@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_FEEDBACK_URL?: string
+  /** Apps Script web-app URL (apps-script/README.md) */
+  readonly VITE_BACKEND_URL?: string
 }

@@ -6,6 +6,7 @@ import { pop, spring, stagger } from '../lib/motion'
 import { ParticleField } from './ParticleField'
 import { PriceTag } from './PriceTag'
 import { Ornament } from './Ornament'
+import { SoldStamp } from './SoldStamp'
 
 interface CupCardProps {
   drink: Drink
@@ -13,10 +14,11 @@ interface CupCardProps {
   /** Show its themed particle field behind the cup */
   particles?: boolean
   className?: string
+  soldOut?: boolean
 }
 
 /** One card for all three drinks — props decide image, accent, particles. */
-export function CupCard({ drink, index = 0, particles = true, className = '' }: CupCardProps) {
+export function CupCard({ drink, index = 0, particles = true, className = '', soldOut = false }: CupCardProps) {
   const px = useMotionValue(0)
   const py = useMotionValue(0)
   const rx = useSpring(useTransform(py, [-0.5, 0.5], [10, -10]), spring.snappy)
@@ -60,6 +62,7 @@ export function CupCard({ drink, index = 0, particles = true, className = '' }: 
         animate={{ rotateY: flipped ? 180 : 0 }}
         transition={{ type: 'spring', stiffness: 160, damping: 18 }}
         onClick={() => setFlipped((f) => !f)}
+        data-track={`kartu-${drink.id}`}
       >
       <div className="relative isolate overflow-hidden rounded-[2rem] border-2 border-brown/10 bg-[#fbf5ec] px-5 pb-6 pt-4 shadow-[0_20px_50px_-24px_rgb(90_46_26/0.45)] [backface-visibility:hidden]">
         {/* tinted glow */}
@@ -73,8 +76,9 @@ export function CupCard({ drink, index = 0, particles = true, className = '' }: 
         {particles && <ParticleField preset={drink.particle} className="-z-10" />}
         <Ornament variant="spice-star" className={`absolute top-4 size-10 opacity-70 ${flip ? 'left-4' : 'right-4'}`} />
 
+        <SoldStamp show={soldOut} className="left-1/2 top-28 -translate-x-1/2" />
         <motion.div
-          className="relative mx-auto h-72 w-60"
+          className={`relative mx-auto h-72 w-60 transition-[filter,opacity] duration-500 ${soldOut ? 'opacity-45 grayscale' : ''}`}
           style={{ x: cupX }}
           animate={{ y: [0, -10, 0], rotate: [0, flip ? 1.5 : -1.5, 0] }}
           transition={{ duration: 4.5, repeat: Infinity, ease: 'easeInOut', delay: index * 0.4 }}

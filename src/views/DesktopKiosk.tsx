@@ -1,14 +1,17 @@
 import { AnimatePresence, motion } from 'motion/react'
 import type { MotionStyle } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
-import { Leaf, MapPin, QrCode, ScanLine, Sparkles, UtensilsCrossed } from 'lucide-react'
+import { Leaf, MapPin, MessageCircleHeart, QrCode, ScanLine, Sparkles, UtensilsCrossed } from 'lucide-react'
 import { BUNDLES, DRINKS, drinkById, TAGLINE } from '../data/menu'
 import { STORY } from '../data/story'
-import { EVENT, FEEDBACK_READY, FEEDBACK_URL, INSTAGRAM_HANDLE } from '../data/event'
+import { EVENT, QR_LINKS } from '../data/event'
 import { useEventPhase } from '../hooks/useEventPhase'
 import { useViewport } from '../hooks/useViewport'
 import { QrCanvas, QrTexture } from '../components/QrCanvas'
 import { WindLeaves } from '../components/WindLeaves'
+import { SoldStamp } from '../components/SoldStamp'
+import { useMenu, type LiveBundle } from '../hooks/useMenu'
+import { useFeedbackOpen } from '../hooks/useFeedbackOpen'
 import { PriceTag } from '../components/PriceTag'
 import { EventStatus } from '../components/EventStatus'
 import { LogoRig } from '../components/LogoRig'
@@ -35,6 +38,7 @@ function useCycle(length: number, ms: number, paused = false) {
 /* ------------------------------------------------------------------ shared bits */
 
 function MenuCarousel() {
+  const { drinks: DRINKS, bundles: BUNDLES } = useMenu()
   const [idx] = useCycle(SLIDES.length, 5500)
   const slide = SLIDES[idx]
   const cups = slide.kind === 'drink' ? [DRINKS[slide.i]] : BUNDLES[slide.i].items.map(drinkById)
@@ -154,6 +158,7 @@ const panelIn = (dir: -1 | 1 | 0, delay = 0) => ({
 })
 
 function ScanCta() {
+  const feedback = useFeedbackOpen().open
   return (
     <div className="flex shrink-0 items-center gap-[1.4vh] rounded-2xl bg-brown p-[1.5vh] text-cream">
       <motion.div className="grid size-[clamp(2rem,5vh,2.8rem)] shrink-0 place-items-center rounded-xl bg-cream/10" animate={{ scale: [1, 1.12, 1] }} transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}>
@@ -161,7 +166,7 @@ function ScanCta() {
       </motion.div>
       <div className="min-w-0 flex-1 leading-tight">
         <p className="whitespace-nowrap font-display text-[clamp(0.95rem,2.2vh,1.25rem)] font-semibold">Scan QR-nya!</p>
-        <p className="truncate font-cond text-[clamp(0.75rem,1.6vh,0.95rem)] italic opacity-80">{FEEDBACK_READY ? 'Kasih feedback buat Pletok' : `Follow ${INSTAGRAM_HANDLE}`}</p>
+        <p className="truncate font-cond text-[clamp(0.75rem,1.6vh,0.95rem)] italic opacity-80">{feedback ? 'Feedback & Instagram kami' : 'Follow Instagram kami'}</p>
       </div>
     </div>
   )
@@ -299,6 +304,8 @@ export function DesktopKiosk({ onEgg, preview = false, build = false, onBuilt }:
   // focus-on-hover: null = nothing hovered, everything shown at full strength
   const [hoverDrink, setHoverDrink] = useState<number | null>(null)
   const [hoverBundle, setHoverBundle] = useState<number | null>(null)
+  const menu = useMenu()
+  const feedback = useFeedbackOpen().open
   const lastPointer = useRef(Date.now())
 
   // phase change or 45s without anyone touching → back to the schedule's layout
@@ -387,8 +394,11 @@ export function DesktopKiosk({ onEgg, preview = false, build = false, onBuilt }:
       <div className="absolute inset-x-0 bottom-0" style={{ top: ISLAND_H }}>
       {/* ============ the morphing QR card ============ */}
       <motion.div layout className={`absolute z-20 flex flex-col overflow-hidden ${card}`} style={qrBox} transition={spring.glide}>
-        <motion.div layout="position" className="relative flex-1" style={{ padding: focus === 'qr' ? 0 : gap }}>
-          <QrCanvas value={FEEDBACK_URL} className="absolute inset-0" />
+        <motion.div layout="position" className="relative flex-1 [perspective:800px]">
+          {/* one code for everything: feedback + socials live on the /link page */}
+          <div className="absolute inset-0" style={{ margin: focus === 'qr' ? 0 : gap }}>
+            <QrCanvas value={QR_LINKS} className="absolute inset-0" />
+          </div>
         </motion.div>
         <AnimatePresence>
           {focus === 'menu' && (
@@ -402,14 +412,20 @@ export function DesktopKiosk({ onEgg, preview = false, build = false, onBuilt }:
             >
               <div className="flex items-center justify-between gap-2">
                 <p className="flex min-w-0 items-center gap-1.5 font-display text-[clamp(0.8rem,1.7vh,1.05rem)] font-semibold leading-tight text-brown">
-                  <ScanLine className="size-[1.2em] shrink-0" /> {FEEDBACK_READY ? 'Scan · feedback' : 'Scan aku'}
+                  <ScanLine className="size-[1.2em] shrink-0" /> Scan aku
                 </p>
                 {/* lives beside the code, never on top of it — covering a finder eye breaks scanning */}
                 <FocusToggle focus={focus} onClick={() => setManual('qr')} />
               </div>
               <div className="flex items-center justify-between gap-2 border-t border-brown/10 pt-[1vh]">
-                <span className="flex min-w-0 items-center gap-1.5 truncate font-display text-[clamp(0.8rem,1.7vh,1.05rem)] font-semibold text-brown/80">
-                  <InstagramIcon className="size-[1.2em] shrink-0" /> {INSTAGRAM_HANDLE}
+                <span className="flex min-w-0 items-center gap-1.5 truncate font-display text-[clamp(0.75rem,1.6vh,1rem)] font-semibold text-brown/80">
+                  {feedback && (
+                    <>
+                      <MessageCircleHeart className="size-[1.2em] shrink-0" /> Feedback
+                      <span className="text-brown/30">·</span>
+                    </>
+                  )}
+                  <InstagramIcon className="size-[1.2em] shrink-0" /> IG
                 </span>
                 <MejaBadge small />
               </div>
@@ -484,20 +500,20 @@ export function DesktopKiosk({ onEgg, preview = false, build = false, onBuilt }:
 
             {/* drink spotlight stage */}
             <motion.section {...panelIn(0, 0.2)} className="absolute z-10 grid grid-cols-3 gap-[1.5vw]" style={{ left: gap, top: gap * 2 + headerH, width: mainW + gap, height: H - headerH - bundlesH - gap * 4 }}>
-              {DRINKS.map((d, i) => (
-                <DrinkSpotlight key={d.id} drink={d} active={hoverDrink === i} dimmed={hoverDrink !== null && hoverDrink !== i} onHover={(on) => setHoverDrink((h) => (on ? i : h === i ? null : h))} />
+              {menu.drinks.map((d, i) => (
+                <DrinkSpotlight key={d.id} drink={d} soldOut={d.soldOut} active={hoverDrink === i} dimmed={hoverDrink !== null && hoverDrink !== i} onHover={(on) => setHoverDrink((h) => (on && !d.soldOut ? i : h === i ? null : h))} />
               ))}
             </motion.section>
 
             {/* bundles strip */}
             <motion.section {...panelIn(0, 0.3)} className="absolute z-10 grid grid-cols-3 gap-[1vw]" style={{ left: gap, width: W - gap * 2, bottom: gap, height: bundlesH }}>
-              {BUNDLES.map((b, i) => (
+              {menu.bundles.map((b, i) => (
                 <BundleTile
                   key={b.name}
                   index={i}
                   bundle={b}
                   dimmed={hoverBundle !== null && hoverBundle !== i}
-                  onHover={(on) => setHoverBundle((h) => (on ? i : h === i ? null : h))}
+                  onHover={(on) => setHoverBundle((h) => (on && !b.soldOut ? i : h === i ? null : h))}
                 />
               ))}
             </motion.section>
@@ -526,6 +542,7 @@ function FocusToggle({ focus, onClick, className = '', style }: { focus: 'qr' | 
     <motion.button
       layoutId="focus-toggle"
       onClick={onClick}
+      data-track={big ? 'lihat-menu' : 'qr-perbesar'}
       className={`relative flex shrink-0 items-center gap-2 overflow-hidden rounded-full bg-brown font-display font-semibold text-cream shadow-[0_5px_0_#3a1c0f] ${big ? 'px-5 py-3 text-[clamp(0.85rem,1.9vh,1.1rem)]' : 'px-3.5 py-2 text-[clamp(0.75rem,1.6vh,0.95rem)]'} ${className}`}
       style={style}
       whileHover={{ scale: 1.05 }}
@@ -594,7 +611,7 @@ function MejaBadge({ small = false }: { small?: boolean }) {
   )
 }
 
-function BundleTile({ bundle, index, dimmed, onHover }: { bundle: (typeof BUNDLES)[number]; index: number; dimmed: boolean; onHover: (on: boolean) => void }) {
+function BundleTile({ bundle, index, dimmed, onHover }: { bundle: LiveBundle; index: number; dimmed: boolean; onHover: (on: boolean) => void }) {
   const cups = bundle.items.map(drinkById)
   const mid = (cups.length - 1) / 2
   return (
@@ -607,7 +624,8 @@ function BundleTile({ bundle, index, dimmed, onHover }: { bundle: (typeof BUNDLE
       transition={spring.snappy}
     >
       {/* cups are allowed to rise out of the tile a little — fills the space and adds depth */}
-      <div className="relative -mt-[3vh] flex h-[calc(100%+3vh)] w-[46%] shrink-0 items-end justify-center">
+      <SoldStamp show={bundle.soldOut} small className="left-[12%] top-1/2 -translate-y-1/2" />
+      <div className={`relative -mt-[3vh] flex h-[calc(100%+3vh)] w-[46%] shrink-0 items-end justify-center transition-[filter,opacity] duration-500 ${bundle.soldOut ? 'opacity-45 grayscale' : ''}`}>
         {cups.map((d, i) => (
           <motion.img
             key={d.id + i}
@@ -627,7 +645,7 @@ function BundleTile({ bundle, index, dimmed, onHover }: { bundle: (typeof BUNDLE
         <p className="font-display text-[clamp(1rem,2.6vh,1.7rem)] font-bold uppercase leading-none text-brown">{bundle.name.replace('Paket ', '')}</p>
         <p className="mt-[0.5vh] line-clamp-2 font-cond text-[clamp(0.7rem,1.55vh,0.95rem)] italic leading-tight text-brown-soft">{bundle.detail}</p>
         <div className="mt-[1vh] flex flex-wrap items-center gap-x-[1vh] gap-y-[0.4vh]">
-          <span className="rounded-xl bg-terracotta px-[1.2vh] py-[0.3vh] font-display text-[clamp(1.4rem,4.2vh,2.6rem)] font-bold leading-tight text-white [text-shadow:1px_2px_0_#5a2e1a]">{bundle.price}K</span>
+          <span className={`rounded-xl px-[1.2vh] py-[0.3vh] font-display text-[clamp(1.4rem,4.2vh,2.6rem)] font-bold leading-tight text-white [text-shadow:1px_2px_0_#5a2e1a] ${bundle.soldOut ? 'bg-brown/30 line-through' : 'bg-terracotta'}`}>{bundle.price}K</span>
           <span className="font-display text-[clamp(0.95rem,2.4vh,1.4rem)] font-bold text-brown/55 line-through decoration-red-700 decoration-2">{bundle.normal}K</span>
           <span className="rounded-full bg-leaf/15 px-2 font-script text-[clamp(1rem,2.4vh,1.45rem)] font-bold text-leaf">hemat {bundle.normal - bundle.price}K</span>
         </div>

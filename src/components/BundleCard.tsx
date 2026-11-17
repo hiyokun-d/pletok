@@ -2,9 +2,10 @@ import { motion } from 'motion/react'
 import { drinkById, type Bundle } from '../data/menu'
 import { spring } from '../lib/motion'
 import { PriceTag } from './PriceTag'
+import { SoldStamp } from './SoldStamp'
 
 /** Bundle card — reuses the drink images; cups slide in and huddle together, then the price slashes. */
-export function BundleCard({ bundle, index = 0 }: { bundle: Bundle; index?: number }) {
+export function BundleCard({ bundle, index = 0, soldOut = false }: { bundle: Bundle; index?: number; soldOut?: boolean }) {
   const cups = bundle.items.map(drinkById)
   const mid = (cups.length - 1) / 2
   const save = (bundle.normal - bundle.price) * 1000
@@ -17,7 +18,8 @@ export function BundleCard({ bundle, index = 0 }: { bundle: Bundle; index?: numb
       variants={{ hidden: {}, show: { transition: { staggerChildren: 0.12 } } }}
       className="relative overflow-hidden rounded-[2rem] border-2 border-brown/10 bg-cream-deep/70 p-5 shadow-[0_16px_40px_-24px_rgb(90_46_26/0.5)]"
     >
-      <div className="relative flex h-44 items-end justify-center">
+      <SoldStamp show={soldOut} className="left-1/2 top-16 -translate-x-1/2" />
+      <div className={`relative flex h-44 items-end justify-center transition-[filter,opacity] duration-500 ${soldOut ? 'opacity-45 grayscale' : ''}`}>
         <motion.div
           aria-hidden
           className="absolute bottom-0 h-6 w-3/4 rounded-[50%] bg-brown/15 blur-md"

@@ -151,7 +151,7 @@ export function PletokEgg({ onDone }: { onDone: () => void }) {
             Whichever story you believe — the name is the sound.
           </motion.p>
           <motion.div className="mt-5 flex justify-center gap-3" variants={{ hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0, transition: spring.glide } }}>
-            <button onClick={replay} className="inline-flex items-center gap-2 rounded-full border-2 border-brown px-5 py-2.5 font-display font-semibold text-brown transition-transform active:scale-95">
+            <button onClick={replay} data-track="egg-aduk-lagi" className="inline-flex items-center gap-2 rounded-full border-2 border-brown px-5 py-2.5 font-display font-semibold text-brown transition-transform active:scale-95">
               <RotateCcw className="size-4" /> Aduk lagi
             </button>
             <button onClick={onDone} className="inline-flex items-center gap-2 rounded-full bg-brown px-5 py-2.5 font-display font-semibold text-cream shadow-[0_4px_0_#3a1c0f] transition-transform active:scale-95">

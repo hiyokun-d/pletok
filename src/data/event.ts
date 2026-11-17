@@ -13,6 +13,20 @@ export const EVENT = {
 export const INSTAGRAM_URL = 'https://www.instagram.com/pletok._/'
 export const INSTAGRAM_HANDLE = '@pletok._'
 
-/** Feedback form is still being built — until VITE_FEEDBACK_URL is set we point to Instagram. */
-export const FEEDBACK_URL: string = import.meta.env.VITE_FEEDBACK_URL || INSTAGRAM_URL
-export const FEEDBACK_READY = Boolean(import.meta.env.VITE_FEEDBACK_URL)
+/** The deployed site — the QR codes point here so scans can be counted before forwarding */
+export const SITE_URL = 'https://pletok.hiyokun.dev'
+
+/**
+ * The ONE booth QR: a links page (feedback on top, then our socials). Each visit is a scan —
+ * counted in Vercel Analytics (/link) and in the Google Sheet. See src/views/LinksPage.tsx.
+ */
+export const QR_LINKS = `${SITE_URL}/link`
+
+/** our own feedback form (src/views/FeedbackPage.tsx) → Google Sheet */
+export const FEEDBACK_URL = '/feedback'
+
+/** everything on the links page, top to bottom — add more (TikTok, photos…) here later */
+export const LINKS = [
+  { kind: 'feedback', label: 'Kasih feedback', sub: 'Like · Wishes · Questions · Ideas — 1 menit', href: FEEDBACK_URL },
+  { kind: 'instagram', label: 'Instagram', sub: INSTAGRAM_HANDLE, href: INSTAGRAM_URL },
+] as const

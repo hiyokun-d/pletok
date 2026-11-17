@@ -1,11 +1,14 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useState } from 'react'
-import { Clock, Coffee, History, Maximize, Minimize, PartyPopper, RotateCcw, Sparkles, X } from 'lucide-react'
+import { BarChart3, Clock, Coffee, History, Maximize, Megaphone, Minimize, PartyPopper, RotateCcw, Sparkles, X } from 'lucide-react'
 import { clockShifted, nudgeClock, setClock, setForcedPhase, useEventPhase, type Phase } from '../hooks/useEventPhase'
 import { EVENT } from '../data/event'
 import { signal } from '../lib/events'
 import { toggleFullscreen, useFullscreen } from '../hooks/useFullscreen'
+import { isBoothDevice, setBoothDevice } from '../lib/analytics'
 import { spring } from '../lib/motion'
+import { useFeedbackOpen } from '../hooks/useFeedbackOpen'
+import { setFeedbackMode } from '../hooks/useMenu'
 
 const OPTIONS: Array<{ id: Phase | null; label: string }> = [
   { id: null, label: 'Auto' },
@@ -43,14 +46,20 @@ const fromWib = (v: string) => Date.parse(`${v.length === 16 ? `${v}:00` : v}+07
 
 /**
  * Crew-only panel. Phase, clock and every scene can be overridden here; the whole site reads
- * one shared clock, so a change here moves everything at once. A + F toggles full-screen (which also keeps the laptop awake). Hold A + B together (or long-press the bottom-left corner on touch)
+ * one shared clock, so a change here moves everything at once. A + G fires the attention show, A + T pops hype stickers (spam it). A + F toggles full-screen (which also keeps the laptop awake). Hold A + B together (or long-press the bottom-left corner on touch)
  * to override the phase if the schedule changes on the day.
  */
 export function PhaseControl() {
   const [open, setOpen] = useState(false)
+  // one crew panel at a time: opening this one closes A + C, and the other way round
+  useEffect(() => {
+    if (open) signal.emit('panel-booth')
+  }, [open])
+  useEffect(() => signal.on('panel-menu', () => setOpen(false)), [])
   const { phase, forced, now, remaining } = useEventPhase()
   const shifted = clockShifted()
   const { full, awake } = useFullscreen()
+  const [booth, setBooth] = useState(isBoothDevice)
 
   useEffect(() => {
     const down = new Set<string>()
@@ -59,6 +68,9 @@ export function PhaseControl() {
       down.add(k)
       if (down.has('a') && down.has('b')) setOpen((o) => !o)
       if (down.has('a') && k === 'f') toggleFullscreen()
+      if (down.has('a') && k === 'g' && !e.repeat) signal.emit('attention')
+      // A + T is meant to be mashed — key-repeat while holding counts too
+      if (down.has('a') && k === 't') signal.emit('hype')
       if (k === 'escape') setOpen(false)
     }
     const onUp = (e: KeyboardEvent) => down.delete(e.key.toLowerCase())
@@ -127,6 +139,13 @@ export function PhaseControl() {
               })}
             </div>
 
+            <Label>Form feedback</Label>
+            <FeedbackSwitch />
+
+            <a href="/hasil" target="_blank" rel="noreferrer" className="mt-2 flex items-center justify-between rounded-2xl bg-cream/5 px-4 py-2.5 font-display text-sm font-semibold hover:bg-cream/10">
+              Lihat hasil feedback (grafik) <span className="font-cond text-xs italic text-cream/50">/hasil · PIN crew ↗</span>
+            </a>
+
             <Label>Waktu</Label>
             <div className="grid grid-cols-5 gap-1.5">
               {JUMPS.map((j) => {
@@ -165,7 +184,7 @@ export function PhaseControl() {
             </div>
 
             <Label>Adegan</Label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <button
                 onClick={() => {
                   setOpen(false)
@@ -185,8 +204,17 @@ export function PhaseControl() {
                 <RotateCcw className="size-4" /> Putar intro
               </button>
               <button
+                onClick={() => {
+                  setOpen(false)
+                  signal.emit('attention')
+                }}
+                className="flex items-center justify-center gap-2 rounded-2xl bg-terracotta px-4 py-3 font-display font-semibold"
+              >
+                <Megaphone className="size-4" /> Tarik perhatian!
+              </button>
+              <button
                 onClick={toggleFullscreen}
-                className={`col-span-2 flex items-center justify-center gap-2 rounded-2xl px-4 py-3 font-display font-semibold ${full ? 'bg-cream text-brown' : 'bg-cream/10'}`}
+                className={`col-span-3 flex items-center justify-center gap-2 rounded-2xl px-4 py-3 font-display font-semibold ${full ? 'bg-cream text-brown' : 'bg-cream/10'}`}
               >
                 {full ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
                 {full ? 'Keluar layar penuh' : 'Layar penuh'}
@@ -197,13 +225,52 @@ export function PhaseControl() {
                 )}
               </button>
             </div>
+            <button
+              onClick={() => {
+                setBoothDevice(!booth)
+                setBooth(!booth)
+              }}
+              className={`mt-2 flex w-full items-center justify-between gap-2 rounded-2xl px-4 py-2.5 font-display text-sm font-semibold ${booth ? 'bg-leaf' : 'bg-cream/10'}`}
+            >
+              <span className="flex items-center gap-2">
+                <BarChart3 className="size-4" /> Laptop booth — jangan dihitung di analytics
+              </span>
+              <span className="rounded-full bg-black/20 px-2 py-0.5 text-xs">{booth ? 'ON' : 'OFF'}</span>
+            </button>
             <p className="mt-3 flex items-center gap-1.5 font-cond text-xs italic text-cream/50">
-              <Sparkles className="size-3" /> A + B panel · A + F layar penuh (anti-sleep) · fase & jam tersimpan walau di-refresh · “Auto” + “Jam asli” = ikut jadwal sungguhan
+              <Sparkles className="size-3" /> A + B panel · A + G tarik perhatian · A + T spam hype · A + F layar penuh (anti-sleep) · fase & jam tersimpan walau di-refresh · “Auto” + “Jam asli” = ikut jadwal sungguhan
             </p>
           </motion.div>
         )}
       </AnimatePresence>
     </>
+  )
+}
+
+/** Auto = open from 13.00 until 25 min after closing; Buka / Tutup override it (synced to phones) */
+function FeedbackSwitch() {
+  const { open, mode, until } = useFeedbackOpen()
+  const hhmm = new Date(until).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit' })
+  const opts = [
+    { id: 'auto', label: 'Auto' },
+    { id: 'open', label: 'Buka' },
+    { id: 'closed', label: 'Tutup' },
+  ] as const
+  return (
+    <div className="flex items-center gap-3">
+      <div className="relative grid flex-1 grid-cols-3 gap-1 rounded-2xl bg-cream/5 p-1">
+        {opts.map((o) => (
+          <button key={o.id} onClick={() => setFeedbackMode(o.id)} className="relative rounded-xl px-2 py-2 font-display text-sm font-semibold">
+            {mode === o.id && <motion.span layoutId="fb-pill" className="absolute inset-0 rounded-xl bg-terracotta" transition={spring.snappy} />}
+            <span className="relative">{o.label}</span>
+          </button>
+        ))}
+      </div>
+      <span className={`shrink-0 rounded-full px-2.5 py-1 font-cond text-xs font-semibold italic ${open ? 'bg-leaf' : 'bg-cream/10 text-cream/60'}`}>
+        {open ? 'terbuka' : 'tertutup'}
+        {mode === 'auto' && ` · auto s/d ${hhmm}`}
+      </span>
+    </div>
   )
 }
 
