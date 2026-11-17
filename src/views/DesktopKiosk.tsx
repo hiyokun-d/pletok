@@ -17,8 +17,11 @@ import { PriceTag } from '../components/PriceTag'
 import { EventStatus } from '../components/EventStatus'
 import { LogoRig } from '../components/LogoRig'
 import { DrinkSpotlight } from '../components/DrinkSpotlight'
+import { SignalBars } from '../components/SignalBars'
+import { useIslandHost, useIslandNote } from '../components/LiveIsland'
 import { InstagramIcon } from '../components/InstagramIcon'
 import { ease, spring } from '../lib/motion'
+import { Morph } from '../components/Morph'
 
 type Focus = 'qr' | 'menu'
 const ISLAND_H = 0 // the phase island only shows on phones
@@ -37,6 +40,14 @@ function useCycle(length: number, ms: number, paused = false) {
 }
 
 /* ------------------------------------------------------------------ shared bits */
+
+/** remote switches: a chip or button grows out of a blur and folds back into one */
+const chipIn = {
+  initial: { opacity: 0, scale: 0.4, filter: 'blur(8px)' },
+  animate: { opacity: 1, scale: 1, filter: 'blur(0px)' },
+  exit: { opacity: 0, scale: 0.4, filter: 'blur(8px)' },
+  transition: { type: 'spring', stiffness: 420, damping: 32, mass: 0.9 },
+} as const
 
 function MenuCarousel() {
   const { drinks: DRINKS, bundles: BUNDLES } = useMenu()
@@ -167,10 +178,15 @@ function ScanCta() {
         <ScanLine className="size-[60%]" />
       </motion.div>
       <div className="min-w-0 flex-1 leading-tight">
-        <p className="whitespace-nowrap font-display text-[clamp(0.95rem,2.2vh,1.25rem)] font-semibold">{preorder ? 'Scan buat pre-order!' : 'Scan QR-nya!'}</p>
-        <p className="truncate font-cond text-[clamp(0.75rem,1.6vh,0.95rem)] italic opacity-80">
-          {preorder ? 'Pesan sekarang, ambil di booth · IG kami' : feedback ? 'Feedback & Instagram kami' : 'Follow Instagram kami'}
-        </p>
+        {/* remote switches (/config) swap the words with a blur instead of a jump */}
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.div key={`${preorder}-${feedback}`} initial={{ opacity: 0, y: 8, filter: 'blur(6px)' }} animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }} exit={{ opacity: 0, y: -8, filter: 'blur(6px)' }} transition={{ duration: 0.35 }}>
+            <p className="whitespace-nowrap font-display text-[clamp(0.95rem,2.2vh,1.25rem)] font-semibold">{preorder ? 'Scan buat pre-order!' : 'Scan QR-nya!'}</p>
+            <p className="truncate font-cond text-[clamp(0.75rem,1.6vh,0.95rem)] italic opacity-80">
+              {preorder ? 'Pesan sekarang, ambil di booth · IG kami' : feedback ? 'Feedback & Instagram kami' : 'Follow Instagram kami'}
+            </p>
+          </motion.div>
+        </AnimatePresence>
       </div>
     </div>
   )
@@ -428,20 +444,25 @@ export function DesktopKiosk({ onEgg, preview = false, build = false, onBuilt }:
               </div>
               {/* the words drop out on a narrow card (icons stay) so the row never wraps or clips */}
               <div className="@container flex items-center justify-between gap-2 border-t border-brown/10 pt-[1vh]">
+                {/* remote on/off from /config: a chip grows in or folds away, the rest slide over */}
                 <span className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap font-display text-[clamp(0.75rem,1.6vh,1rem)] font-semibold text-brown/80 [&_.lbl]:hidden @min-[13rem]:[&_.lbl]:inline">
-                  {preorder && (
-                    <>
-                      <ShoppingBag className="size-[1.2em] shrink-0" /> <span className="lbl">Pre-order</span>
-                      <span className="text-brown/30">·</span>
-                    </>
-                  )}
-                  {feedback && (
-                    <>
-                      <MessageCircleHeart className="size-[1.2em] shrink-0" /> <span className="lbl">Feedback</span>
-                      <span className="text-brown/30">·</span>
-                    </>
-                  )}
-                  <InstagramIcon className="size-[1.2em] shrink-0" /> IG
+                  <AnimatePresence mode="popLayout" initial={false}>
+                    {preorder && (
+                      <motion.span key="po" layout {...chipIn} className="flex items-center gap-1.5">
+                        <ShoppingBag className="size-[1.2em] shrink-0" /> <span className="lbl">Pre-order</span>
+                        <span className="text-brown/30">·</span>
+                      </motion.span>
+                    )}
+                    {feedback && (
+                      <motion.span key="fb" layout {...chipIn} className="flex items-center gap-1.5">
+                        <MessageCircleHeart className="size-[1.2em] shrink-0" /> <span className="lbl">Feedback</span>
+                        <span className="text-brown/30">·</span>
+                      </motion.span>
+                    )}
+                    <motion.span key="ig" layout transition={chipIn.transition} className="flex items-center gap-1.5">
+                      <InstagramIcon className="size-[1.2em] shrink-0" /> IG
+                    </motion.span>
+                  </AnimatePresence>
                 </span>
                 <MejaBadge small />
               </div>
@@ -463,6 +484,9 @@ export function DesktopKiosk({ onEgg, preview = false, build = false, onBuilt }:
                   <p className="mt-[0.8vh] flex items-center gap-1.5 font-display text-[clamp(0.75rem,1.7vh,1rem)] leading-tight text-brown/80">
                     <MapPin className="size-[1.1em] shrink-0" />
                     {EVENT.place} · {EVENT.campus}
+                  </p>
+                  <p className="mt-[0.6vh] flex items-center gap-2 font-cond text-[clamp(0.7rem,1.5vh,0.9rem)] font-semibold uppercase italic tracking-widest text-brown/50">
+                    Sinyal <SignalBars label className="normal-case not-italic tracking-normal" />
                   </p>
                 </div>
                 <MejaBadge />
@@ -544,21 +568,21 @@ export function DesktopKiosk({ onEgg, preview = false, build = false, onBuilt }:
 
       {/* layout switch — so visitors can browse right here, not only on their phones */}
       {focus === 'qr' && (
-        <motion.div className="absolute z-30 flex items-center gap-3" style={{ left: '50%', x: '-50%', top: qrBigTop + qrBig + H * 0.025 }}>
-          <FocusToggle focus={focus} onClick={() => setManual('menu')} />
+        <motion.div layout transition={chipIn.transition} className="absolute z-30 flex items-center gap-3" style={{ left: '50%', x: '-50%', top: qrBigTop + qrBig + H * 0.025 }}>
+          <motion.div layout transition={chipIn.transition}>
+            <FocusToggle focus={focus} onClick={() => setManual('menu')} />
+          </motion.div>
           {/* pre-order right on this screen — no phone needed (laptop visitors, or the crew helping someone) */}
-          <AnimatePresence>
+          <AnimatePresence mode="popLayout">
             {preorder && (
               <motion.a
+                layout
                 href="/preorder"
                 data-track="preorder-kiosk"
                 className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-terracotta px-5 py-3 font-display text-[clamp(0.85rem,1.9vh,1.1rem)] font-semibold text-cream shadow-[0_5px_0_#7a3c1b]"
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.8 }}
+                {...chipIn}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.93 }}
-                transition={spring.glide}
               >
                 <ShoppingBag className="size-[1.1em]" /> Pre-order di sini
               </motion.a>
@@ -619,19 +643,44 @@ function TimerPill() {
   const clock = `${p2(Math.floor(s / 3600))}:${p2(Math.floor((s % 3600) / 60))}:${p2(s % 60)}`
   const label = phase === 'pre-open' ? 'Segera buka' : last ? 'Last call!' : 'Sedang buka'
   const value = phase === 'pre-open' ? (daysAway >= 2 ? `${daysAway} hari lagi` : clock) : clock
+  // remote changes from /config show up right here: the pill swells into the notice and folds back
+  useIslandHost()
+  const note = useIslandNote()
   return (
     <motion.div
       layout
-      className={`flex h-full items-center gap-[1vh] whitespace-nowrap rounded-full px-[1.8vh] font-display text-[clamp(0.8rem,1.9vh,1.15rem)] font-semibold shadow-[0_8px_20px_-10px_rgb(90_46_26/0.6)] ${last ? 'bg-terracotta text-cream' : 'bg-[#1a0d06] text-cream'}`}
-      animate={last ? { scale: [1, 1.06, 1, 1.04, 1] } : { scale: 1 }}
-      transition={last ? { duration: 1.2, repeat: Infinity, repeatDelay: 0.4 } : spring.snappy}
+      className={`flex h-full max-w-full items-center gap-[1vh] overflow-hidden whitespace-nowrap rounded-full px-[1.8vh] font-display text-[clamp(0.8rem,1.9vh,1.15rem)] font-semibold shadow-[0_8px_20px_-10px_rgb(90_46_26/0.6)] ${last && !note ? 'bg-terracotta text-cream' : 'bg-[#1a0d06] text-cream'}`}
+      style={{ borderRadius: 999 }}
+      animate={last && !note ? { scale: [1, 1.06, 1, 1.04, 1] } : { scale: 1 }}
+      transition={last && !note ? { duration: 1.2, repeat: Infinity, repeatDelay: 0.4 } : { type: 'spring', stiffness: 420, damping: 30, mass: 0.9 }}
     >
-      <span className="relative flex size-2.5">
-        {phase !== 'pre-open' && <span className="absolute inline-flex size-full animate-ping rounded-full bg-current opacity-60" style={{ color: last ? '#f5ebdd' : '#8faa4f' }} />}
-        <span className="relative inline-flex size-2.5 rounded-full" style={{ background: last ? '#f5ebdd' : phase === 'pre-open' ? '#c98a3c' : '#8faa4f' }} />
-      </span>
-      <span>{label}</span>
-      <span className={`font-bold tabular-nums ${last ? 'text-cream' : 'text-yakult'}`}>{value}</span>
+      <AnimatePresence mode="popLayout" initial={false}>
+        {note ? (
+          <motion.span key={`note-${note.id}`} layout="position" {...chipIn} className="flex min-w-0 items-center gap-[0.8vh]">
+            <motion.span
+              className="grid size-[1.6em] shrink-0 place-items-center rounded-full"
+              style={{ background: `${note.tone}33`, color: note.tone }}
+              initial={{ scale: 0, rotate: -40 }}
+              animate={{ scale: 1, rotate: 0 }}
+              transition={{ type: 'spring', stiffness: 500, damping: 18, delay: 0.1 }}
+            >
+              <note.icon className="size-[0.9em]" />
+            </motion.span>
+            <span className="truncate">{note.short ?? note.text}</span>
+          </motion.span>
+        ) : (
+          <motion.span key="clock" layout="position" {...chipIn} className="flex items-center gap-[1vh]">
+            <span className="relative flex size-2.5">
+              {phase !== 'pre-open' && <span className="absolute inline-flex size-full animate-ping rounded-full bg-current opacity-60" style={{ color: last ? '#f5ebdd' : '#8faa4f' }} />}
+              <span className="relative inline-flex size-2.5 rounded-full" style={{ background: last ? '#f5ebdd' : phase === 'pre-open' ? '#c98a3c' : '#8faa4f' }} />
+            </span>
+            <span>{label}</span>
+            <span className={`font-bold tabular-nums ${last ? 'text-cream' : 'text-yakult'}`}>{value}</span>
+            {/* the booth's line to the Sheet, right where the crew glances anyway */}
+            <SignalBars dark className="ml-[0.4vh] text-[1em]" />
+          </motion.span>
+        )}
+      </AnimatePresence>
     </motion.div>
   )
 }
@@ -681,9 +730,13 @@ function BundleTile({ bundle, index, dimmed, onHover }: { bundle: LiveBundle; in
         <p className="font-display text-[clamp(1rem,2.6vh,1.7rem)] font-bold uppercase leading-none text-brown">{bundle.name.replace('Paket ', '')}</p>
         <p className="mt-[0.5vh] line-clamp-2 font-cond text-[clamp(0.7rem,1.55vh,0.95rem)] italic leading-tight text-brown-soft">{bundle.detail}</p>
         <div className="mt-[1vh] flex flex-wrap items-center gap-x-[1vh] gap-y-[0.4vh]">
-          <span className={`rounded-xl px-[1.2vh] py-[0.3vh] font-display text-[clamp(1.4rem,4.2vh,2.6rem)] font-bold leading-tight text-white [text-shadow:1px_2px_0_#5a2e1a] ${bundle.soldOut ? 'bg-brown/30 line-through' : 'bg-terracotta'}`}>{bundle.price}K</span>
-          <span className="font-display text-[clamp(0.95rem,2.4vh,1.4rem)] font-bold text-brown/55 line-through decoration-red-700 decoration-2">{bundle.normal}K</span>
-          <span className="rounded-full bg-leaf/15 px-2 font-script text-[clamp(1rem,2.4vh,1.45rem)] font-bold text-leaf">hemat {bundle.normal - bundle.price}K</span>
+          <span className={`rounded-xl px-[1.2vh] py-[0.3vh] font-display text-[clamp(1.4rem,4.2vh,2.6rem)] font-bold leading-tight text-white [text-shadow:1px_2px_0_#5a2e1a] ${bundle.soldOut ? 'bg-brown/30 line-through' : 'bg-terracotta'}`}><Morph text={`${bundle.price}K`} /></span>
+          {bundle.normal > bundle.price && (
+            <>
+              <span className="font-display text-[clamp(0.95rem,2.4vh,1.4rem)] font-bold text-brown/55 line-through decoration-red-700 decoration-2"><Morph text={`${bundle.normal}K`} /></span>
+              <span className="rounded-full bg-leaf/15 px-2 font-script text-[clamp(1rem,2.4vh,1.45rem)] font-bold text-leaf">hemat <Morph text={`${bundle.normal - bundle.price}K`} /></span>
+            </>
+          )}
         </div>
       </div>
     </motion.div>

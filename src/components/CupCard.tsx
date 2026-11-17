@@ -1,12 +1,14 @@
 import { motion, useMotionValue, useSpring, useTransform } from 'motion/react'
-import { useState, type PointerEvent } from 'react'
+import { useEffect, useState, type PointerEvent } from 'react'
 import { RotateCw } from 'lucide-react'
-import { bundlesWith, INGREDIENT_NOTES, type Drink } from '../data/menu'
+import { INGREDIENT_NOTES, type Drink } from '../data/menu'
+import { useMenu } from '../hooks/useMenu'
 import { pop, spring, stagger } from '../lib/motion'
 import { ParticleField } from './ParticleField'
 import { PriceTag } from './PriceTag'
 import { Ornament } from './Ornament'
 import { SoldStamp } from './SoldStamp'
+import { Morph } from './Morph'
 
 interface CupCardProps {
   drink: Drink
@@ -19,6 +21,7 @@ interface CupCardProps {
 
 /** One card for all three drinks — props decide image, accent, particles. */
 export function CupCard({ drink, index = 0, particles = true, className = '', soldOut = false }: CupCardProps) {
+  const { bundles } = useMenu()
   const px = useMotionValue(0)
   const py = useMotionValue(0)
   const rx = useSpring(useTransform(py, [-0.5, 0.5], [10, -10]), spring.snappy)
@@ -37,6 +40,12 @@ export function CupCard({ drink, index = 0, particles = true, className = '', so
 
   const flip = index % 2 === 1
   const [flipped, setFlipped] = useState(false)
+  // the flip is a spring we read ourselves: each face shows only on its half of the turn,
+  // because Safari can ignore backface-visibility once the faces hold animated layers
+  const turn = useSpring(0, { stiffness: 160, damping: 18 })
+  useEffect(() => turn.set(flipped ? 180 : 0), [flipped, turn])
+  const frontShown = useTransform(turn, (v) => (v < 90 ? 1 : 0))
+  const backShown = useTransform(turn, (v) => (v < 90 ? 0 : 1))
 
   return (
     <motion.article
@@ -59,12 +68,11 @@ export function CupCard({ drink, index = 0, particles = true, className = '', so
       >
       <motion.div
         className="relative [transform-style:preserve-3d]"
-        animate={{ rotateY: flipped ? 180 : 0 }}
-        transition={{ type: 'spring', stiffness: 160, damping: 18 }}
+        style={{ rotateY: turn }}
         onClick={() => setFlipped((f) => !f)}
         data-track={`kartu-${drink.id}`}
       >
-      <div className="relative isolate overflow-hidden rounded-[2rem] border-2 border-brown/10 bg-[#fbf5ec] px-5 pb-6 pt-4 shadow-[0_20px_50px_-24px_rgb(90_46_26/0.45)] [backface-visibility:hidden]">
+      <motion.div style={{ opacity: frontShown }} className="relative isolate overflow-hidden rounded-[2rem] border-2 border-brown/10 bg-[#fbf5ec] px-5 pb-6 pt-4 shadow-[0_20px_50px_-24px_rgb(90_46_26/0.45)] [backface-visibility:hidden] [-webkit-backface-visibility:hidden]">
         {/* tinted glow */}
         <motion.div
           aria-hidden
@@ -124,12 +132,12 @@ export function CupCard({ drink, index = 0, particles = true, className = '', so
         <p className="mt-3 flex items-center gap-1.5 font-cond text-sm font-semibold italic text-brown/50">
           <RotateCw className="size-3.5" /> tap untuk lihat rempahnya
         </p>
-      </div>
+      </motion.div>
 
       {/* back face */}
-      <div
-        className="absolute inset-0 flex flex-col overflow-hidden rounded-[2rem] border-2 p-6 text-cream [backface-visibility:hidden] [transform:rotateY(180deg)]"
-        style={{ background: `linear-gradient(160deg, #5a2e1a, ${drink.accent})`, borderColor: `${drink.accent}66` }}
+      <motion.div
+        className="absolute inset-0 flex flex-col overflow-hidden rounded-[2rem] border-2 p-6 text-cream [backface-visibility:hidden] [-webkit-backface-visibility:hidden] [transform:rotateY(180deg)]"
+        style={{ opacity: backShown, background: `linear-gradient(160deg, #5a2e1a, ${drink.accent})`, borderColor: `${drink.accent}66` }}
       >
         <p className="font-cond text-sm font-semibold uppercase italic tracking-widest text-yakult/80">Di dalam gelasnya</p>
         <h3 className="mt-1 font-display text-2xl font-bold uppercase leading-none">{drink.name}</h3>
@@ -149,9 +157,9 @@ export function CupCard({ drink, index = 0, particles = true, className = '', so
         <div className="mt-auto pt-4">
           <p className="font-cond text-sm font-semibold uppercase italic tracking-widest text-yakult/80">Ada di paket</p>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {bundlesWith(drink.id).map((b) => (
+            {bundles.filter((b) => b.items.includes(drink.id)).map((b) => (
               <span key={b.name} className="rounded-full bg-cream/15 px-3 py-1 font-display text-sm font-semibold">
-                {b.name.replace('Paket ', '')} · {b.price}K
+                {b.name.replace('Paket ', '')} · <Morph text={`${b.price}K`} />
               </span>
             ))}
           </div>
@@ -159,7 +167,7 @@ export function CupCard({ drink, index = 0, particles = true, className = '', so
             <RotateCw className="size-3.5" /> tap untuk balik
           </p>
         </div>
-      </div>
+      </motion.div>
       </motion.div>
       </motion.div>
     </motion.article>

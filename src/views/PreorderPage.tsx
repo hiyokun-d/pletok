@@ -12,6 +12,7 @@ import { PaperPlane } from '../components/PaperPlane'
 import { ParticleField } from '../components/ParticleField'
 import { Sprout } from '../components/Sprout'
 import { spring } from '../lib/motion'
+import { useMenu } from '../hooks/useMenu'
 
 /** the plane loops at least this long, so a fast answer still reads as "on its way" */
 const MIN_FLIGHT_MS = 1600
@@ -34,7 +35,9 @@ export function PreorderPage() {
     return () => window.clearTimeout(t)
   }, [loaded])
   // `normal` = the booth menu price; when the pre-order price is lower we show what they save
-  const items = PREORDER_ITEMS.filter((i) => config.items[i.id]?.on).map((i) => ({ ...i, normal: i.price, price: config.items[i.id].price }))
+  const live = useMenu()
+  const menuPrice = (i: (typeof PREORDER_ITEMS)[number]) => (i.kind === 'drink' ? live.drinks.find((d) => d.id === i.id)?.price : live.bundles.find((b) => b.name === i.name)?.price) ?? i.price
+  const items = PREORDER_ITEMS.filter((i) => config.items[i.id]?.on).map((i) => ({ ...i, normal: menuPrice(i), price: config.items[i.id].price }))
   const [qty, setQty] = useState<Record<string, number>>({})
   const [name, setName] = useState('')
   const [wa, setWa] = useState('')

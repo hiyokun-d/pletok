@@ -82,10 +82,15 @@ export interface RemoteStats {
 
 export async function fetchStats(): Promise<RemoteStats | null> {
   if (!BACKEND) return null
+  // a crowd-drowned network can hang a request for minutes — give up and count it as a miss
+  const abort = new AbortController()
+  const t = window.setTimeout(() => abort.abort(), 15_000)
   try {
-    return (await (await fetch(BACKEND)).json()) as RemoteStats
+    return (await (await fetch(BACKEND, { signal: abort.signal })).json()) as RemoteStats
   } catch {
     return null
+  } finally {
+    window.clearTimeout(t)
   }
 }
 
@@ -211,11 +216,29 @@ export const pushMenu = (state: unknown) => {
  * phones stays far under Apps Script's limits (the script also caches for 10 s).
  */
 const statSubs = new Set<(s: RemoteStats) => void>()
+/** how the last poll went — the real signal at the booth, not what the phone's bars claim */
+export interface NetState {
+  ok: boolean
+  /** round trip to the Sheet in ms (null when it failed) */
+  rtt: number | null
+  /** 0 = not measured yet */
+  at: number
+}
+let net: NetState = { ok: true, rtt: null, at: 0 }
+const netSubs = new Set<() => void>()
+export const netState = () => net
+export const onNet = (f: () => void) => {
+  netSubs.add(f)
+  return () => void netSubs.delete(f)
+}
 let lastStats: RemoteStats | null = null
 let polling = false
 async function pollOnce() {
   if (document.visibilityState === 'hidden') return
+  const t0 = performance.now()
   const s = await fetchStats()
+  net = { ok: !!s, rtt: s ? performance.now() - t0 : null, at: Date.now() }
+  netSubs.forEach((f) => f())
   if (!s) return
   lastStats = s
   statSubs.forEach((f) => f(s))

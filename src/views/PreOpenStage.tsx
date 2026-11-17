@@ -1,13 +1,14 @@
 import { AnimatePresence, motion, useAnimate, useMotionValue, useSpring, useTransform, type MotionValue } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import { CalendarDays, Clock, MapPin } from 'lucide-react'
-import { DRINKS } from '../data/menu'
 import { EVENT } from '../data/event'
 import { useEventPhase } from '../hooks/useEventPhase'
 import { LogoRig } from '../components/LogoRig'
 import { ParticleField } from '../components/ParticleField'
 import { WindLeaves } from '../components/WindLeaves'
 import { ease, spring } from '../lib/motion'
+import { useMenu } from '../hooks/useMenu'
+import { Morph } from '../components/Morph'
 
 type Pt = [number, number]
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -31,6 +32,7 @@ const ZOOM_TO = 2 * 60_000
  * tick, the three drinks below — and a simulated wind blowing leaves across the stage.
  */
 export function PreOpenStage({ onEgg }: { onEgg: () => void }) {
+  const live = useMenu()
   const { remaining, daysAway } = useEventPhase()
   const [scope, animate] = useAnimate()
   const [burst, setBurst] = useState<{ key: number; pts: Pt[] }>()
@@ -176,7 +178,7 @@ export function PreOpenStage({ onEgg }: { onEgg: () => void }) {
 
         {/* the line-up, leaning into the wind */}
         <motion.div style={{ y: outY, opacity: outFade }} className="mt-auto flex w-full items-end justify-center gap-[5vw] pb-[3vh]">
-          {DRINKS.map((dr, i) => (
+          {live.drinks.map((dr, i) => (
             <motion.div
               key={dr.id}
               className="flex flex-col items-center"
@@ -186,7 +188,7 @@ export function PreOpenStage({ onEgg }: { onEgg: () => void }) {
             >
               <WindCup src={dr.image} alt={dr.name} lean={lean} index={i} />
               <p className="mt-[0.8vh] font-display text-[clamp(0.85rem,2vh,1.2rem)] font-bold uppercase text-brown">
-                {dr.short} <span className="text-terracotta">{dr.price}K</span>
+                {dr.short} <Morph className="text-terracotta" text={`${dr.price}K`} />
               </p>
             </motion.div>
           ))}

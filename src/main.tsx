@@ -8,6 +8,7 @@ import { LinksPage } from './views/LinksPage'
 import { FeedbackPage } from './views/FeedbackPage'
 import { HasilPage } from './views/HasilPage'
 import { PreorderPage } from './views/PreorderPage'
+import { ConfigPage } from './views/ConfigPage'
 import { OfflinePill } from './components/OfflinePill'
 import { ErrorBoundary, ErrorPage, type ErrorKind } from './views/ErrorPage'
 import { beforeSend, installClickTracking, trackSource } from './lib/analytics'
@@ -22,6 +23,7 @@ const PAGES: Record<string, () => ReactNode> = {
   '/feedback': () => <FeedbackPage />,
   '/hasil': () => <HasilPage />,
   '/preorder': () => <PreorderPage />,
+  '/config': () => <ConfigPage />,
 }
 // dev only: /_error/500 (or 503, offline) previews the other error pages
 const preview = import.meta.env.DEV ? path.match(/^\/_error\/(404|500|503|offline)$/)?.[1] : undefined
@@ -46,7 +48,8 @@ if (!hop) {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>{page}</ErrorBoundary>
-    {!hop && <OfflinePill />}
+    {/* the booth app has its own island for this */}
+    {!hop && path !== '' && <OfflinePill />}
     {/* free Vercel Web Analytics + Speed Insights (only report on the deployed site, not localhost) */}
     <Analytics beforeSend={beforeSend} />
     {!hop && <SpeedInsights />}

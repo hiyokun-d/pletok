@@ -12,7 +12,7 @@ const LABEL = {
   closed: { title: 'Sudah tutup', note: 'Terima kasih sudah mampir!' },
 } as const
 
-/** Countdown block (the phase badge itself lives in the PhaseIsland). Same component on mobile and the booth screen. */
+/** Countdown block (the phase badge itself lives in the LiveIsland). Same component on mobile and the booth screen. */
 export function EventStatus({ size = 'md', align = 'start', teaser = false }: { size?: 'sm' | 'md' | 'lg' | 'fluid'; align?: 'start' | 'center'; teaser?: boolean }) {
   const { phase, remaining, daysAway } = useEventPhase()
   if (teaser && phase === 'pre-open') return <Teaser days={daysAway} />

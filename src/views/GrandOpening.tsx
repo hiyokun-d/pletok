@@ -1,6 +1,6 @@
 import { AnimatePresence, motion, useAnimate } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
-import { BUNDLES, DRINKS, drinkById } from '../data/menu'
+import { DRINKS, drinkById } from '../data/menu'
 import { EVENT, INSTAGRAM_HANDLE } from '../data/event'
 import { useEventPhase } from '../hooks/useEventPhase'
 import { useViewport } from '../hooks/useViewport'
@@ -8,6 +8,7 @@ import { LogoRig } from '../components/LogoRig'
 import { ParticleField } from '../components/ParticleField'
 import { ease } from '../lib/motion'
 import { Flame, Leaf, ShieldCheck } from 'lucide-react'
+import { useMenu } from '../hooks/useMenu'
 
 type Scene = 'count' | 'title' | 'logo' | 'halal' | 'tour' | 'finale'
 const STOPS = DRINKS.length + 1 // three drinks + the bundles
@@ -31,6 +32,7 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
  * Esc skips straight to the menu.
  */
 export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
+  const live = useMenu() // today's prices (editable on /config)
   const { now, phase } = useEventPhase()
   const { w: W, h: H } = useViewport()
   // phones get their own framing: tighter cups, chips instead of side callouts, stacked bundles
@@ -392,7 +394,7 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
             <div className="cam absolute inset-0 will-change-transform" style={{ transformOrigin: '50% 50%' }}>
               {/* motion's `initial` applies once — a re-render (e.g. resize) can't snap the strip back */}
               <motion.div className="strip absolute left-0 top-0 h-full will-change-transform" style={{ width: `${STOPS * 100}vw` }} initial={{ x: '100vw' }}>
-                {DRINKS.map((d, i) => (
+                {live.drinks.map((d, i) => (
                   <Station key={d.id} drink={d} index={i} active={station === i} shown={reached >= i || scene === 'finale'} portrait={portrait} />
                 ))}
                 <BundleStop index={DRINKS.length} active={station === DRINKS.length} portrait={portrait} />
@@ -605,6 +607,7 @@ function Station({ drink, index, active, shown, portrait }: { drink: (typeof DRI
 
 /** Last tour stop: the three bundles — old price gets struck, the deal stamps in */
 function BundleStop({ index, active, portrait }: { index: number; active: boolean; portrait: boolean }) {
+  const { bundles } = useMenu()
   return (
     <div className="bundle-stop absolute top-0 h-full w-screen" style={{ left: `${index * 100}vw` }}>
       <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse 55% 55% at 50% 55%, #f1d3a8, transparent 75%)' }} />
@@ -622,7 +625,7 @@ function BundleStop({ index, active, portrait }: { index: number; active: boolea
       </motion.div>
 
       <div className={`absolute inset-x-[5%] bottom-[5%] grid ${portrait ? 'top-[19%] grid-rows-3 gap-[2vh]' : 'top-[25%] grid-cols-3 gap-[3vw]'}`}>
-        {BUNDLES.map((b, k) => (
+        {bundles.map((b, k) => (
           <motion.div
             key={b.name}
             className={`flex min-h-0 items-center ${portrait ? 'flex-row gap-4 rounded-3xl bg-[#fbf5ec]/80 px-3' : 'flex-col'}`}
@@ -646,7 +649,8 @@ function BundleStop({ index, active, portrait }: { index: number; active: boolea
             <p className={`font-display font-bold uppercase leading-none text-brown ${portrait ? 'text-[3.2vh]' : 'mt-[2vh] text-[4.2vh]'}`}>{b.name.replace('Paket ', '')}</p>
             <p className="mt-[0.8vh] font-cond text-[2vh] font-semibold italic leading-tight text-brown-soft">{b.detail}</p>
             <div className="mt-[1.6vh] flex items-center gap-[1.4vh]">
-              <span className="relative font-display text-[3.4vh] font-bold text-brown/45">
+              {/* no strike when a price edit made the bundle cost the same as its cups */}
+              {b.normal > b.price && <span className="relative font-display text-[3.4vh] font-bold text-brown/45">
                 {b.normal}K
                 <motion.span
                   className="absolute inset-x-[-8%] top-1/2 h-[3px] origin-left rounded-full bg-terracotta"
@@ -654,7 +658,7 @@ function BundleStop({ index, active, portrait }: { index: number; active: boolea
                   animate={{ scaleX: active ? 1 : 0 }}
                   transition={{ duration: 0.35, delay: active ? 1.1 + k * 0.25 : 0 }}
                 />
-              </span>
+              </span>}
               <motion.span
                 className="rounded-2xl bg-terracotta px-[1.6vh] py-[0.5vh] font-display text-[5vh] font-bold leading-none text-cream shadow-[0_6px_0_rgb(90_46_26/0.3)]"
                 initial={false}
@@ -664,14 +668,14 @@ function BundleStop({ index, active, portrait }: { index: number; active: boolea
                 {b.price}K
               </motion.span>
             </div>
-            <motion.span
+            {b.normal > b.price && <motion.span
               className="mt-[1vh] rounded-full bg-leaf px-3 py-0.5 font-cond text-[2vh] font-semibold uppercase italic text-cream"
               initial={false}
               animate={{ opacity: active ? 1 : 0, scale: active ? 1 : 0.5 }}
               transition={{ ...{ type: 'spring', stiffness: 400, damping: 18 }, delay: active ? 1.8 + k * 0.25 : 0 }}
             >
               hemat {b.normal - b.price}K
-            </motion.span>
+            </motion.span>}
             </div>
           </motion.div>
         ))}

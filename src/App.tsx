@@ -7,7 +7,7 @@ import { trackClick } from './lib/analytics'
 import { Intro } from './components/Intro'
 import { PletokEgg } from './components/PletokEgg'
 import { PhaseControl } from './components/PhaseControl'
-import { PhaseIsland } from './components/PhaseIsland'
+import { LiveIsland } from './components/LiveIsland'
 import { MobileSite } from './views/MobileSite'
 import { DesktopKiosk } from './views/DesktopKiosk'
 import { PreOpenStage } from './views/PreOpenStage'
@@ -27,6 +27,13 @@ export default function App() {
   const menu = useMenu()
   const selling = phase === 'open' || phase === 'last-call'
   const soldOut = menu.allSoldOut && selling
+  // sold out while someone's watching: the island says "Ludes terjual!" first, then the stage takes over
+  const [soldOutShown, setSoldOutShown] = useState(soldOut)
+  useEffect(() => {
+    if (!soldOut) return setSoldOutShown(false)
+    const t = window.setTimeout(() => setSoldOutShown(true), 2200)
+    return () => window.clearTimeout(t)
+  }, [soldOut])
   // desktop pre-open: the countdown stage from the day before (or under 23h); earlier, a preview dashboard
   const countdownStage = phase === 'pre-open' && (daysAway <= 1 || remaining < 23 * 3600_000)
   const desktop = useIsDesktop()
@@ -80,8 +87,8 @@ export default function App() {
     <MotionConfig reducedMotion="user">
       <AnimatePresence mode="wait">
         {/* nothing renders under the ceremony, so the booth's entrance plays the moment it ends */}
-        {!intro && !closed && !grand && soldOut && <SoldOutStage key="soldout" desktop={desktop} />}
-        {!intro && !closed && !grand && !soldOut && (desktop ? (countdownStage ? <PreOpenStage key="pre" onEgg={openEgg} /> : <DesktopKiosk key={`desk-${buildRun}`} onEgg={openEgg} preview={phase === 'pre-open'} build={buildKiosk} onBuilt={built} />) : <MobileSite key="mob" onEgg={openEgg} />)}
+        {!intro && !closed && !grand && soldOutShown && <SoldOutStage key="soldout" desktop={desktop} />}
+        {!intro && !closed && !grand && !soldOutShown && (desktop ? (countdownStage ? <PreOpenStage key="pre" onEgg={openEgg} /> : <DesktopKiosk key={`desk-${buildRun}`} onEgg={openEgg} preview={phase === 'pre-open'} build={buildKiosk} onBuilt={built} />) : <MobileSite key="mob" onEgg={openEgg} />)}
         {!intro && closed && <ClosingSequence key="closed" desktop={desktop} />}
       </AnimatePresence>
       <AnimatePresence>
@@ -91,8 +98,8 @@ export default function App() {
         {attention > 0 && !grand && <AttentionShow key={`attn-${attention}`} onDone={() => setAttention(0)} />}
         {grand && <GrandOpening key="grand" mode={grand} onDone={finishGrand} />}
       </AnimatePresence>
-      {/* the island is a phone thing, and only while we count down to opening */}
-      <AnimatePresence>{!desktop && !intro && !grand && !egg && phase === 'pre-open' && <PhaseIsland key="island" />}</AnimatePresence>
+      {/* one island for everything live: the phone countdown before we open + every remote change from /config */}
+      <LiveIsland desktop={desktop} phaseBase={!desktop && phase === 'pre-open'} hidden={intro || !!grand || egg} />
       <HypeLayer />
       <PhaseControl />
     </MotionConfig>

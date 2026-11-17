@@ -19,6 +19,8 @@ interface BundleOverride {
 interface MenuState {
   soldAt: Partial<Record<DrinkId, number>>
   bundles: Record<string, BundleOverride>
+  /** menu prices changed on /config, in thousands — drink id or bundle name → price */
+  prices?: Record<string, number>
   /** the crew closed the booth early (everything sold) */
   closedAt?: number
   /** last change, to tell the newer copy apart when syncing */
@@ -97,7 +99,9 @@ export const describe = (items: DrinkId[]) =>
     .join(' + ')
 
 function derive(s: MenuState): LiveMenu {
-  const drinks = DRINKS.map((d) => ({ ...d, soldOut: s.soldAt[d.id] !== undefined, soldAt: s.soldAt[d.id] }))
+  const price = (key: string, base: number) => s.prices?.[key] ?? base
+  const drinks = DRINKS.map((d) => ({ ...d, price: price(d.id, d.price), soldOut: s.soldAt[d.id] !== undefined, soldAt: s.soldAt[d.id] }))
+  const drinkPrice = (id: DrinkId) => drinks.find((d) => d.id === id)!.price
   const sold = (id: DrinkId) => s.soldAt[id] !== undefined
   const bundles = BUNDLES.map((b) => {
     const o = s.bundles[b.name] ?? {}
@@ -105,8 +109,9 @@ function derive(s: MenuState): LiveMenu {
     const edited = !!o.items && o.items.join() !== b.items.join()
     const out = items.find(sold)
     const reason = o.forced ? 'manual' : out ? drinkById(out).short : undefined
-    const normal = edited ? items.reduce((n, id) => n + drinkById(id).price, 0) : b.normal
-    return { ...b, items, normal, detail: edited ? describe(items) : b.detail, soldOut: !!reason, reason, edited }
+    // "was" price = the cups bought one by one, at today's prices
+    const normal = items.reduce((n, id) => n + drinkPrice(id), 0)
+    return { ...b, items, price: price(b.name, b.price), normal, detail: edited ? describe(items) : b.detail, soldOut: !!reason, reason, edited }
   })
   const allSoldOut = drinks.every((d) => d.soldOut)
   return { drinks, bundles, allSoldOut, anySoldOut: drinks.some((d) => d.soldOut) || bundles.some((b) => b.soldOut), closedEarly: !!s.closedAt }
@@ -181,7 +186,15 @@ export function setClosedEarly(closed: boolean) {
   commit({ ...state, closedAt: closed ? Date.now() : undefined })
 }
 
+/** today's menu price for a drink id or bundle name; `null` = back to the printed menu */
+export function setMenuPrice(key: string, price: number | null) {
+  const prices = { ...state.prices }
+  if (price === null) delete prices[key]
+  else prices[key] = Math.max(1, Math.min(500, Math.round(price)))
+  commit({ ...state, prices })
+}
+
 /** restock: everything back on sale, bundles back to their recipe, booth open again */
 export function resetMenu() {
-  commit(empty())
+  commit({ ...empty(), prices: state.prices })
 }

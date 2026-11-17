@@ -1,9 +1,10 @@
 import { AnimatePresence, motion, useAnimate } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
-import { BUNDLES, DRINKS } from '../data/menu'
+import { DRINKS } from '../data/menu'
 import { EVENT } from '../data/event'
 import { ParticleField } from './ParticleField'
 import { ease } from '../lib/motion'
+import { useMenu } from '../hooks/useMenu'
 
 type Pt = [number, number]
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -17,6 +18,7 @@ const BEATS = ['PSST!', 'HAUS?', 'SINI!'] as const
  * then "COBAIN DI MEJA 9!" with confetti — and it gets out of the way again.
  */
 export function AttentionShow({ onDone }: { onDone: () => void }) {
+  const live = useMenu()
   const [scope, animate] = useAnimate()
   const [beat, setBeat] = useState(-1)
   const [burst, setBurst] = useState<{ key: number; pts: Pt[] }>()
@@ -142,7 +144,7 @@ export function AttentionShow({ onDone }: { onDone: () => void }) {
         </span>
         <span className="atn-cta rounded-[3vh] bg-terracotta px-[4vh] py-[1.6vh] text-center font-display text-[min(8vw,11vh)] font-bold uppercase leading-none text-cream opacity-0 shadow-[0_1.2vh_0_#5a2e1a]">
           Cobain di {EVENT.table}!
-          <span className="mt-[1vh] block font-script text-[min(4vw,5.5vh)] normal-case text-yakult">mulai {Math.min(...DRINKS.map((d) => d.price))}K · paket hemat {Math.min(...BUNDLES.map((b) => b.price))}K</span>
+          <span className="mt-[1vh] block font-script text-[min(4vw,5.5vh)] normal-case text-yakult">mulai {Math.min(...live.drinks.map((d) => d.price))}K · paket hemat {Math.min(...live.bundles.map((b) => b.price))}K</span>
         </span>
       </div>
 

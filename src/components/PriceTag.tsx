@@ -1,5 +1,6 @@
 import { motion } from 'motion/react'
 import { spring } from '../lib/motion'
+import { Morph } from './Morph'
 
 interface PriceTagProps {
   price: number
@@ -44,14 +45,15 @@ export function PriceTag({ price, was, size = 'md', className = '', delay = 0 }:
           <path d="M14 22 C 40 12 90 16 140 12" stroke="#c98a3c" strokeWidth={3} fill="none" opacity={0.5} strokeLinecap="round" />
           <path d="M20 64 C 60 70 110 66 146 62" stroke="#7a3d1c" strokeWidth={3} fill="none" opacity={0.5} strokeLinecap="round" />
         </svg>
-        <span className="relative font-display font-bold leading-none text-white [text-shadow:2px_3px_0_#5a2e1a]">{price}K</span>
+        <span className="relative font-display font-bold leading-none text-white [text-shadow:2px_3px_0_#5a2e1a]"><Morph text={`${price}K`} /></span>
       </motion.div>
-      {was !== undefined && (
+      {/* only a real discount gets the strike — a price edit can make the bundle cost the same */}
+      {was !== undefined && was > price && (
         <motion.span
           className={`relative font-display font-bold text-brown/80 ${s.was}`}
           variants={{ hidden: { opacity: 0, x: -10 }, show: { opacity: 1, x: 0, transition: spring.snappy } }}
         >
-          {was}K
+          <Morph text={`${was}K`} />
           <svg className="absolute inset-x-[-4px] top-1/2 h-4 w-[calc(100%+8px)] -translate-y-1/2 overflow-visible" viewBox="0 0 60 12" preserveAspectRatio="none" aria-hidden>
             <motion.path
               d="M2 9 C 20 6 40 5 58 2"

@@ -17,12 +17,11 @@ Every feedback, every QR scan and the sold-out state are saved in **one Google S
 5. Copy the **Web app URL** (`https://script.google.com/macros/s/…/exec`) and paste it to Claude, or set it yourself:
    - in Vercel → Project → Settings → Environment Variables: `VITE_BACKEND_URL` = that URL, then **Redeploy**;
    - locally, in `.env.local` (not committed): `VITE_BACKEND_URL=…`
-6. Crew: open **`/hasil`** on your phone and enter the PIN. The **Menu hari ini** card marks drinks sold out, swaps bundle cups, closes early or restocks. The booth screen and every phone follow; the Sheet keeps it as the script property `MENU`.
-7. Admins: open **`/hasil`** with the PIN. From there you can:
-   - see the results;
+6. Crew: open **`/config`** on your phone and enter the PIN (`/hasil` has a big button to it, and a tab switch at the top of both). The **Menu hari ini** card marks drinks sold out, swaps bundle cups, changes **menu prices** (*Harga menu*), closes early or restocks. The booth screen and every phone follow — the changed prices roll in and the top island says what changed; the Sheet keeps it as the script property `MENU`.
+7. Admins, also on **`/config`**:
    - open or close the feedback form remotely (saved as the script property `FEEDBACK_MODE`);
-   - switch pre-order on or off, set the cut-off (24 Nov 23:59 WIB at the latest — it can be moved earlier, never into the event day; with pre-order switched on 18 Nov that is a 7-day window), and turn each item on or off or change its price (saved as `PREORDER`);
-   - see every pre-order. At pickup, match the code and name, tap ✓ to mark it done, and use **Hubungi** to WhatsApp a customer.
+   - switch pre-order on or off, set the cut-off (24 Nov 23:59 WIB at the latest — it can be moved earlier, never into the event day; with pre-order switched on 18 Nov that is a 7-day window), and turn each item on or off. Pre-order prices go in as a number **or** a % off the menu price; *Semua item: diskon X% → Terapkan* does every item at once, *Samakan dengan harga menu* resets them (saved as `PREORDER`). A %-price is saved as a number, so after changing a menu price press *Terapkan* again.
+8. Admins, on **`/hasil`** (same PIN): the results and every pre-order. At pickup, match the code and name, tap ✓ to mark it done, and use **Hubungi** to WhatsApp a customer.
 
    Every admin control turns **yellow with a spinner** while it waits for the Sheet, and goes back to normal once every phone sees the change.
 

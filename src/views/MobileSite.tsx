@@ -1,11 +1,11 @@
-import { motion, useScroll, useSpring, useTransform } from 'motion/react'
+import { AnimatePresence, motion, useScroll, useSpring, useTransform } from 'motion/react'
 import { useRef } from 'react'
-import { CalendarDays, Clock, MapPin, ShoppingBag, Sparkles } from 'lucide-react'
+import { CalendarDays, Clock, MapPin, MessageCircleHeart, ShoppingBag, Sparkles } from 'lucide-react'
 import { InstagramIcon } from '../components/InstagramIcon'
 import { DRINKS, TAGLINE } from '../data/menu'
 import { useMenu } from '../hooks/useMenu'
 import { SOURCES, STORY } from '../data/story'
-import { EVENT, INSTAGRAM_HANDLE, INSTAGRAM_URL } from '../data/event'
+import { EVENT, FEEDBACK_URL, INSTAGRAM_HANDLE, INSTAGRAM_URL } from '../data/event'
 import { useEventPhase } from '../hooks/useEventPhase'
 import { ParticleField } from '../components/ParticleField'
 import { Ornament } from '../components/Ornament'
@@ -13,9 +13,9 @@ import { LogoRig } from '../components/LogoRig'
 import { CupCard } from '../components/CupCard'
 import { BundleCard } from '../components/BundleCard'
 import { EventStatus } from '../components/EventStatus'
-import { FeedbackButton } from '../components/FeedbackButton'
 import { usePreorder } from '../hooks/usePreorder'
 import { useFeedbackOpen } from '../hooks/useFeedbackOpen'
+import { SignalBars } from '../components/SignalBars'
 import { Reveal, RevealItem } from '../components/Reveal'
 import { drop, ease, pop, spring } from '../lib/motion'
 
@@ -168,6 +168,13 @@ export function MobileSite({ onEgg }: { onEgg: () => void }) {
       {/* ---------- menu ---------- */}
       <section className="relative z-10 mx-auto w-full max-w-lg px-5 py-12">
         <SectionTitle kicker="Pilih rasamu" title="Menu" />
+        {/* measured against our own Sheet — the crew can tell "the booth wifi is drowning" at a glance */}
+        <div className="-mt-2 mb-6 flex justify-center">
+          <span className="inline-flex items-center gap-2 rounded-full bg-cream-deep/80 px-3 py-1.5 ring-1 ring-brown/10">
+            <span className="font-cond text-xs font-semibold uppercase italic tracking-widest text-brown/50">Sinyal</span>
+            <SignalBars label />
+          </span>
+        </div>
         <div className="flex flex-col gap-8">
           {menu.drinks.map((d, i) => (
             <CupCard key={d.id} drink={d} index={i} soldOut={d.soldOut} />
@@ -275,30 +282,65 @@ export function MobileSite({ onEgg }: { onEgg: () => void }) {
       {/* ---------- sticky action bar ---------- */}
       <motion.div style={{ y: barY }} className="fixed inset-x-0 bottom-0 z-30 flex items-center justify-center gap-3 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
         <div className="absolute inset-0 bg-gradient-to-t from-cream via-cream/80 to-transparent" />
-        {/* one big button: feedback once the form opens, pre-order until then */}
-        {preorder && !feedback && (
-          <motion.a
-            href="/preorder"
-            whileTap={{ scale: 0.94 }}
-            initial={{ y: 30, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            className="relative inline-flex items-center gap-2 rounded-full bg-brown px-6 py-3.5 font-display font-semibold text-cream shadow-[0_5px_0_#3a1c0f]"
-          >
-            <ShoppingBag className="size-5" /> Pre-order sekarang
+        <ActionDock preorder={preorder} feedback={feedback} />
+      </motion.div>
+    </motion.main>
+  )
+}
+
+/** a button that grows out of the dock and folds back into it */
+const morphIn = {
+  initial: { opacity: 0, scale: 0.4, filter: 'blur(8px)' },
+  animate: { opacity: 1, scale: 1, filter: 'blur(0px)' },
+  exit: { opacity: 0, scale: 0.4, filter: 'blur(8px)' },
+}
+const DOCK = { type: 'spring', stiffness: 420, damping: 32, mass: 0.9 } as const
+
+/**
+ * The bottom bar as a little island: up to three buttons (feedback, pre-order, Instagram) in one
+ * dark capsule. When the crew opens or closes feedback / pre-order from /config, the capsule
+ * stretches or shrinks and the button grows out of it or folds back in — no jump.
+ */
+function ActionDock({ preorder, feedback }: { preorder: boolean; feedback: boolean }) {
+  const count = 1 + Number(preorder) + Number(feedback)
+  const pill = 'relative inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-full font-display font-semibold'
+  return (
+    <motion.div layout transition={DOCK} className="relative flex items-center gap-1.5 bg-[#1a0d06] p-1.5 shadow-[0_14px_34px_-12px_rgb(0_0_0/0.55)]" style={{ borderRadius: 999 }}>
+      <AnimatePresence mode="popLayout" initial={false}>
+        {feedback && (
+          <motion.a key="feedback" layout href={FEEDBACK_URL} data-track="mobile-feedback" {...morphIn} transition={DOCK} whileTap={{ scale: 0.93 }} className={`${pill} bg-yakult px-5 text-brown`}>
+            <MessageCircleHeart className="size-5 shrink-0" />
+            <motion.span layout="position">{count > 2 ? 'Feedback' : 'Kasih feedback'}</motion.span>
           </motion.a>
         )}
-        <FeedbackButton className="relative" />
+        {preorder && (
+          <motion.a key="preorder" layout href="/preorder" data-track="mobile-preorder" {...morphIn} transition={DOCK} whileTap={{ scale: 0.93 }} className={`${pill} bg-terracotta px-5 text-cream`}>
+            <ShoppingBag className="size-5 shrink-0" />
+            <motion.span layout="position">{count > 2 ? 'Pre-order' : 'Pre-order sekarang'}</motion.span>
+          </motion.a>
+        )}
         <motion.a
+          key="ig"
+          layout
           href={INSTAGRAM_URL}
           target="_blank"
           rel="noreferrer"
+          data-track="mobile-instagram"
+          transition={DOCK}
           whileTap={{ scale: 0.9 }}
-          className="relative grid size-12 place-items-center rounded-full border-2 border-brown bg-cream text-brown"
+          className={`${pill} justify-center bg-cream/10 text-cream ${count > 1 ? 'w-12' : 'px-5'}`}
           aria-label="Instagram Pletok"
         >
-          <InstagramIcon className="size-5" />
+          <InstagramIcon className="size-5 shrink-0" />
+          <AnimatePresence mode="popLayout" initial={false}>
+            {count === 1 && (
+              <motion.span key="ig-label" layout="position" initial={{ opacity: 0, filter: 'blur(4px)' }} animate={{ opacity: 1, filter: 'blur(0px)' }} exit={{ opacity: 0, filter: 'blur(4px)' }}>
+                Follow {INSTAGRAM_HANDLE}
+              </motion.span>
+            )}
+          </AnimatePresence>
         </motion.a>
-      </motion.div>
-    </motion.main>
+      </AnimatePresence>
+    </motion.div>
   )
 }

@@ -4,6 +4,7 @@ import { spring } from '../lib/motion'
 import { ParticleField } from './ParticleField'
 import { PriceTag } from './PriceTag'
 import { SoldStamp } from './SoldStamp'
+import { Morph } from './Morph'
 
 interface DrinkSpotlightProps {
   drink: Drink
@@ -72,7 +73,7 @@ export function DrinkSpotlight({ drink, active, dimmed, onHover, soldOut = false
         <div className="flex max-w-full items-center justify-center gap-[1.2vh]">
           <h3 className="min-w-0 font-display text-[clamp(1.1rem,3vh,2.1rem)] font-bold uppercase leading-[0.95] text-brown">{drink.name.replace('Pletok ', '')}</h3>
           {soldOut ? (
-            <span className="shrink-0 font-display text-[3.4vh] font-bold text-brown/40 line-through decoration-terracotta decoration-[0.4vh]">{drink.price}K</span>
+            <span className="shrink-0 font-display text-[3.4vh] font-bold text-brown/40 line-through decoration-terracotta decoration-[0.4vh]"><Morph text={`${drink.price}K`} /></span>
           ) : (
             <PriceTag price={drink.price} size="fluid" className="shrink-0" />
           )}

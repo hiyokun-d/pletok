@@ -37,7 +37,7 @@ export function SoldOutStage({ desktop }: { desktop: boolean }) {
 
   return (
     <motion.main
-      className="fixed inset-0 overflow-hidden bg-brown text-cream"
+      className="fixed inset-0 overflow-y-auto overflow-x-hidden bg-brown text-cream"
       initial={{ clipPath: 'circle(0% at 50% 50%)' }}
       animate={{ clipPath: 'circle(150% at 50% 50%)' }}
       exit={{ opacity: 0 }}
@@ -46,7 +46,8 @@ export function SoldOutStage({ desktop }: { desktop: boolean }) {
       <ParticleField preset="leaf" overrides={{ count: desktop ? 26 : 14, opacity: 0.35 }} />
       <ParticleField preset="burst" overrides={{ shape: 'sparkle', count: 160, burstSpeed: [300, 1100] }} points={[[window.innerWidth / 2, window.innerHeight * 0.45]]} burstKey={boom} />
 
-      <div className="relative flex h-full flex-col items-center justify-center px-6 text-center">
+      {/* phones: room under the countdown pill, and it scrolls instead of piling up */}
+      <div className="relative flex min-h-full flex-col items-center justify-center px-6 pb-[6vh] pt-[11vh] text-center lg:py-0">
         <div className="flex items-end justify-center gap-[2vw]">
           {DRINKS.map((d, i) => (
             <motion.div
@@ -68,7 +69,7 @@ export function SoldOutStage({ desktop }: { desktop: boolean }) {
         </div>
 
         <motion.h1
-          className="mt-[4vh] font-script text-[clamp(3.2rem,12vh,8rem)] font-bold leading-none text-yakult"
+          className="mt-[4vh] font-script text-[clamp(3rem,min(12vh,15vw),8rem)] font-bold leading-none text-yakult"
           initial={{ scale: 3, opacity: 0, rotate: -8 }}
           animate={boom ? { scale: 1, opacity: 1, rotate: -3 } : {}}
           transition={{ type: 'spring', stiffness: 380, damping: 16 }}
@@ -125,7 +126,7 @@ export function SoldOutStage({ desktop }: { desktop: boolean }) {
       )}
       {/* the booth stays up until the official close (or the crew taps "Tutup sekarang" on /hasil) */}
       <motion.div
-        className="absolute left-1/2 top-[3vh] flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/25 px-4 py-2 font-display text-[clamp(0.85rem,1.9vh,1.05rem)] font-semibold ring-1 ring-cream/10"
+        className="fixed left-1/2 top-[3vh] z-10 flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full bg-black/25 px-4 py-2 font-display text-[clamp(0.85rem,1.9vh,1.05rem)] font-semibold ring-1 ring-cream/10"
         initial={{ y: -30, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ ...spring.snappy, delay: 0.8 }}
@@ -134,7 +135,7 @@ export function SoldOutStage({ desktop }: { desktop: boolean }) {
         <span className="text-cream/70">Booth tutup dalam</span>
         <span className="tabular-nums text-yakult">{left}</span>
       </motion.div>
-      <p className="absolute bottom-[3vh] left-0 right-0 text-center font-cond text-sm italic text-cream/35 lg:left-[2.5vw] lg:right-auto lg:text-left">
+      <p className="absolute bottom-[3vh] left-[2.5vw] hidden font-cond text-sm italic text-cream/35 lg:block">
         {EVENT.table} · {EVENT.name}
       </p>
     </motion.main>

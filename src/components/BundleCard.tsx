@@ -3,6 +3,7 @@ import { drinkById, type Bundle } from '../data/menu'
 import { spring } from '../lib/motion'
 import { PriceTag } from './PriceTag'
 import { SoldStamp } from './SoldStamp'
+import { Morph } from './Morph'
 
 /** Bundle card — reuses the drink images; cups slide in and huddle together, then the price slashes. */
 export function BundleCard({ bundle, index = 0, soldOut = false }: { bundle: Bundle; index?: number; soldOut?: boolean }) {
@@ -61,10 +62,10 @@ export function BundleCard({ bundle, index = 0, soldOut = false }: { bundle: Bun
       </motion.p>
       <div className="mt-3 flex items-center justify-between gap-2">
         <motion.span
-          className="font-script text-2xl font-bold text-brown"
+          className={`font-script text-2xl font-bold text-brown ${save > 0 ? '' : 'invisible'}`}
           variants={{ hidden: { opacity: 0, rotate: -6 }, show: { opacity: 1, rotate: -3, transition: spring.pop } }}
         >
-          Hemat Rp {save.toLocaleString('id-ID')}
+          Hemat Rp <Morph text={save.toLocaleString('id-ID')} />
         </motion.span>
         <PriceTag price={bundle.price} was={bundle.normal} size="sm" delay={0.3} />
       </div>
