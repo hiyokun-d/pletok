@@ -1,9 +1,11 @@
 import { motion } from 'motion/react'
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Crown, Download, ShieldCheck, ExternalLink, HelpCircle, Lightbulb, Lock, MessageCircleHeart, RefreshCw, ScanLine, Sparkles, Star, ThumbsUp, Users } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Check, Crown, Download, ExternalLink, HelpCircle, Lightbulb, Loader2, Lock, MessageCircle, MessageCircleHeart, RefreshCw, ScanLine, Search, ShieldCheck, ShoppingBag, Sparkles, Star, ThumbsUp, Users, Wallet } from 'lucide-react'
 import { EVENT } from '../data/event'
 import { DRINKS } from '../data/menu'
-import { BACKEND, crewPin, fetchResults, setCrewPin, setFeedbackModeRemote, type Response, type Results } from '../lib/backend'
+import { BACKEND, crewPin, fetchResults, savePreorderConfig, setCrewPin, setFeedbackModeRemote, setOrderDone, type Order, type PreorderConfig, type Response, type Results } from '../lib/backend'
+import { DEFAULT_CUTOFF, DEFAULT_PREORDER, PREORDER_ITEMS, rupiah } from '../data/preorder'
+import { usePreorder } from '../hooks/usePreorder'
 import { useFeedbackOpen, type FeedbackMode } from '../hooks/useFeedbackOpen'
 import { spring } from '../lib/motion'
 
@@ -23,6 +25,9 @@ const GRID = [
 ] as const
 const REFRESH_MS = 30_000
 const BUCKET_MIN = 15
+/** "saved here, not in the Sheet yet" — every admin control turns this colour until the Sheet agrees */
+const WAIT = '#e8b53a'
+const wait = (ms: number) => new Promise((r) => window.setTimeout(r, ms))
 
 const pct = (n: number, of: number) => (of ? Math.round((n / of) * 100) : 0)
 const hhmm = (ms: number) => new Date(ms).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit' })
@@ -36,6 +41,8 @@ export function HasilPage() {
   const [data, setData] = useState<Results | null>(DEMO ? demoResults() : null)
   const [state, setState] = useState<'idle' | 'loading' | 'error' | 'pin'>('idle')
   const [at, setAt] = useState<number | undefined>(DEMO ? Date.now() : undefined)
+  const preorder = usePreorder()
+  const [demoPreorder, setDemoPreorder] = useState<PreorderConfig>(DEFAULT_PREORDER)
 
   // keep it out of search results
   useEffect(() => {
@@ -88,7 +95,32 @@ export function HasilPage() {
         </div>
       </header>
 
-      {!DEMO && <AdminPanel pin={pin} />}
+      <AdminPanel demo={DEMO} save={(m) => (DEMO ? wait(1200).then(() => true) : setFeedbackModeRemote(pin, m))} />
+      <PreorderAdmin
+        remote={DEMO ? demoPreorder : preorder.config}
+        loaded={DEMO || preorder.loaded}
+        save={async (c) => {
+          if (!DEMO) return savePreorderConfig(pin, c)
+          await wait(1200)
+          setDemoPreorder(c)
+          return true
+        }}
+      />
+      {data?.orders && (
+        <Orders
+          orders={data.orders}
+          setDone={async (code, done) => {
+            if (DEMO) {
+              await wait(1200)
+              setData((d) => d && { ...d, orders: d.orders?.map((o) => (o.code === code ? { ...o, done } : o)) })
+              return true
+            }
+            const ok = await setOrderDone(pin, code, done)
+            if (ok) void load()
+            return ok
+          }}
+        />
+      )}
       {data && <Summary data={data} />}
     </Shell>
   )
@@ -103,16 +135,30 @@ const MODES: Array<{ id: FeedbackMode; label: string; hint: string }> = [
 ]
 
 /** the ONLY place the feedback form is opened / closed — saved in the Sheet, every phone follows */
-function AdminPanel({ pin }: { pin: string }) {
-  const { open, mode, until } = useFeedbackOpen()
-  const [saving, setSaving] = useState<FeedbackMode | null>(null)
+function AdminPanel({ save, demo }: { save: (m: FeedbackMode) => Promise<boolean>; demo?: boolean }) {
+  const live = useFeedbackOpen()
+  const [demoMode, setDemoMode] = useState<FeedbackMode>('auto')
+  const mode = demo ? demoMode : live.mode
+  // the pill moves on click; it stays yellow until the Sheet reports the same mode back
+  const [pending, setPending] = useState<FeedbackMode | null>(null)
   const [failed, setFailed] = useState(false)
+  const latest = useRef(0)
+  useEffect(() => {
+    if (pending && mode === pending) setPending(null)
+  }, [mode, pending])
+  const shown = pending ?? mode
+  const open = demo ? shown === 'open' : live.open
   const pick = async (m: FeedbackMode) => {
-    setSaving(m)
+    if (m === shown) return
+    const n = ++latest.current
+    setPending(m)
     setFailed(false)
-    const ok = await setFeedbackModeRemote(pin, m)
-    setSaving(null)
-    if (!ok) setFailed(true)
+    const ok = await save(m)
+    if (n !== latest.current) return
+    if (!ok) {
+      setPending(null)
+      setFailed(true)
+    } else if (demo) setDemoMode(m)
   }
   return (
     <section className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-3xl bg-brown p-5 text-cream">
@@ -121,23 +167,307 @@ function AdminPanel({ pin }: { pin: string }) {
         <div>
           <p className="font-display text-lg font-bold leading-tight">
             Form feedback{' '}
-            <span className={`ml-1 rounded-full px-2.5 py-0.5 align-middle font-cond text-sm font-semibold italic ${open ? 'bg-leaf' : 'bg-cream/15 text-cream/70'}`}>{open ? 'terbuka' : 'tertutup'}</span>
+            <span className={`ml-1 rounded-full px-2.5 py-0.5 align-middle font-cond text-sm font-semibold italic ${pending ? 'text-brown' : open ? 'bg-leaf' : 'bg-cream/15 text-cream/70'}`} style={pending ? { background: WAIT } : undefined}>
+              {pending ? 'menyimpan…' : open ? 'terbuka' : 'tertutup'}
+            </span>
           </p>
           <p className="font-cond text-sm italic text-cream/60">
-            {failed ? 'Gagal menyimpan — cek sinyal / PIN' : mode === 'auto' ? `Auto: buka ${EVENT.timeLabel.split(' –')[0]} s/d ${hhmm(until)} (25 menit setelah tutup)` : 'Manual — semua HP ikut dalam ±30 detik'}
+            {failed
+              ? 'Gagal menyimpan — cek sinyal / PIN'
+              : pending
+                ? 'Menunggu Google Sheet… semua HP ikut dalam ±30 detik'
+                : mode === 'auto'
+                  ? `Auto: buka ${EVENT.timeLabel.split(' –')[0]} s/d ${hhmm(live.until)} (25 menit setelah tutup)`
+                  : 'Manual — semua HP ikut dalam ±30 detik'}
           </p>
         </div>
       </div>
       <div className="relative grid grid-cols-3 gap-1 rounded-2xl bg-cream/10 p-1">
-        {MODES.map((m) => (
-          <button key={m.id} onClick={() => void pick(m.id)} disabled={!!saving} className="relative min-w-24 rounded-xl px-3 py-2 text-center">
-            {mode === m.id && <motion.span layoutId="admin-mode" className="absolute inset-0 rounded-xl bg-terracotta" transition={spring.snappy} />}
-            <span className="relative block font-display text-sm font-semibold">{saving === m.id ? '…' : m.label}</span>
-            <span className="relative block font-cond text-[0.7rem] italic text-cream/60">{m.hint}</span>
-          </button>
-        ))}
+        {MODES.map((m) => {
+          const on = shown === m.id
+          const syncing = on && !!pending
+          return (
+            <button key={m.id} onClick={() => void pick(m.id)} aria-pressed={on} className={`relative min-w-24 rounded-xl px-3 py-2 text-center ${syncing ? 'text-brown' : ''}`}>
+              {on && <motion.span layoutId="admin-mode" className="absolute inset-0 rounded-xl" style={{ background: syncing ? WAIT : 'var(--color-terracotta)' }} transition={spring.snappy} />}
+              <span className="relative flex items-center justify-center gap-1.5 font-display text-sm font-semibold">
+                {syncing && <Loader2 className="size-3.5 animate-spin" />}
+                {m.label}
+              </span>
+              <span className={`relative block font-cond text-[0.7rem] italic ${syncing ? 'text-brown/70' : 'text-cream/60'}`}>{syncing ? 'menyimpan…' : m.hint}</span>
+            </button>
+          )
+        })}
       </div>
     </section>
+  )
+}
+
+/* ------------------------------------------------------------------ pre-order admin */
+
+/** the shape the Sheet stores (rounded, clamped, every item present) — so "same as the Sheet" is a string compare */
+const normPreorder = (c: PreorderConfig): PreorderConfig => ({
+  enabled: !!c.enabled,
+  cutoff: Math.min(c.cutoff, DEFAULT_CUTOFF),
+  items: Object.fromEntries(
+    PREORDER_ITEMS.map((i) => {
+      const s = c.items[i.id] ?? { on: true, price: i.price }
+      return [i.id, { on: s.on !== false, price: Math.max(1, Math.min(500, Math.round(s.price || i.price))) }]
+    }),
+  ),
+})
+const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+/** <input type="datetime-local"> speaks WIB regardless of the laptop's timezone */
+const toWib = (ms: number) => new Date(ms + 7 * 3_600_000).toISOString().slice(0, 16)
+const fromWib = (v: string) => new Date(`${v}:00+07:00`).getTime()
+
+function PreorderAdmin({ remote, loaded, save }: { remote: PreorderConfig; loaded: boolean; save: (c: PreorderConfig) => Promise<boolean> }) {
+  // local edits live here until the Sheet reports the same thing back; anything that differs is yellow
+  const [draft, setDraft] = useState<PreorderConfig | null>(null)
+  const [failed, setFailed] = useState(false)
+  const seq = useRef(0)
+  const saved = normPreorder(remote)
+  const cfg = draft ?? remote
+  const want = draft && normPreorder(draft)
+
+  useEffect(() => {
+    if (draft && sameJson(normPreorder(draft), normPreorder(remote))) setDraft(null)
+  }, [draft, remote])
+
+  // one save shortly after the last change, so typing a price isn't a save per key
+  const saveRef = useRef(save)
+  saveRef.current = save
+  useEffect(() => {
+    // a price box left empty mid-typing isn't saved (the Sheet would fall back to the menu price)
+    if (!draft || PREORDER_ITEMS.some((i) => !(draft.items[i.id]?.price > 0))) return
+    const n = ++seq.current
+    const t = window.setTimeout(async () => {
+      const ok = await saveRef.current(normPreorder(draft))
+      if (!ok && n === seq.current) {
+        setDraft(null)
+        setFailed(true)
+      }
+    }, 800)
+    return () => window.clearTimeout(t)
+  }, [draft])
+
+  const edit = (f: (c: PreorderConfig) => PreorderConfig) => {
+    setFailed(false)
+    setDraft((d) => f(d ?? remote))
+  }
+  const setItem = (id: string, patch: Partial<{ on: boolean; price: number }>) =>
+    edit((c) => ({ ...c, items: { ...c.items, [id]: { ...(c.items[id] ?? { on: true, price: 0 }), ...patch } } }))
+
+  const pending = !!want
+  const open = cfg.enabled && Date.now() < Math.min(cfg.cutoff, DEFAULT_CUTOFF)
+  const dirty = (pick: (c: PreorderConfig) => unknown) => !!want && !sameJson(pick(want), pick(saved))
+
+  return (
+    <Card
+      className="mt-6"
+      title={
+        <span className="flex flex-wrap items-center gap-2">
+          <ShoppingBag className="size-5 text-terracotta" /> Pre-order
+          <span className={`rounded-full px-2.5 py-0.5 font-cond text-sm font-semibold italic ${pending ? 'text-brown' : open ? 'bg-leaf text-cream' : 'bg-brown/10 text-brown/60'}`} style={pending ? { background: WAIT } : undefined}>
+            {pending ? 'menyimpan…' : open ? 'terbuka' : cfg.enabled ? 'lewat batas' : 'tertutup'}
+          </span>
+        </span>
+      }
+      meta={failed ? 'Gagal menyimpan — cek sinyal / PIN' : loaded ? 'Tersimpan di Google Sheet · HP pelanggan ikut dalam ±30 detik' : 'Memuat pengaturan…'}
+    >
+      <div className={`grid gap-3 sm:grid-cols-2 ${loaded ? '' : 'pointer-events-none opacity-50'}`}>
+        <label className="flex items-center justify-between gap-3 rounded-2xl bg-cream-deep/60 p-4">
+          <span>
+            <span className="block font-display font-semibold">Terima pre-order</span>
+            <span className="font-cond text-sm italic text-brown/60">Link muncul di halaman QR · <a href="/preorder" target="_blank" className="underline">lihat /preorder</a></span>
+          </span>
+          <Switch on={cfg.enabled} pending={dirty((c) => c.enabled)} onClick={() => edit((c) => ({ ...c, enabled: !c.enabled }))} label="Terima pre-order" />
+        </label>
+        <label className="flex items-center justify-between gap-3 rounded-2xl bg-cream-deep/60 p-4" style={dirty((c) => c.cutoff) ? { boxShadow: `inset 0 0 0 2px ${WAIT}` } : undefined}>
+          <span>
+            <span className="block font-display font-semibold">Batas pesan (WIB)</span>
+            <span className="font-cond text-sm italic text-brown/60">Paling lambat H-1 ({dayTime(DEFAULT_CUTOFF)}) — hari-H tidak ada pre-order</span>
+          </span>
+          <input
+            type="datetime-local"
+            value={toWib(Math.min(cfg.cutoff, DEFAULT_CUTOFF))}
+            max={toWib(DEFAULT_CUTOFF)}
+            onChange={(e) => e.target.value && edit((c) => ({ ...c, cutoff: Math.min(fromWib(e.target.value), DEFAULT_CUTOFF) }))}
+            className="rounded-xl bg-cream px-2.5 py-2 font-cond text-sm outline-none focus:ring-2 focus:ring-terracotta"
+          />
+        </label>
+      </div>
+
+      <ul className={`mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 ${loaded ? '' : 'pointer-events-none opacity-50'}`}>
+        {PREORDER_ITEMS.map((it) => {
+          const s = cfg.items[it.id] ?? { on: true, price: it.price }
+          const syncing = dirty((c) => c.items[it.id])
+          return (
+            <li key={it.id} className={`flex items-center gap-3 rounded-2xl border-2 p-3 transition-opacity ${s.on ? '' : 'opacity-55'}`} style={{ borderColor: syncing ? WAIT : 'rgb(90 46 26 / 0.08)' }}>
+              <span className="flex shrink-0 -space-x-3">
+                {it.images.map((src, i) => <img key={i} src={src} alt="" className="h-11 w-auto drop-shadow" />)}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-display text-sm font-semibold">{it.name}</span>
+                <span className="mt-1 flex items-center font-cond text-sm">
+                  Rp
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={500}
+                    value={s.price || ''}
+                    onChange={(e) => setItem(it.id, { price: Math.min(500, Math.max(0, Math.round(Number(e.target.value)))) })}
+                    aria-label={`Harga ${it.name} (ribu)`}
+                    className="mx-1 w-12 rounded-lg bg-cream-deep/70 px-1.5 py-0.5 text-right font-display font-semibold tabular-nums outline-none focus:ring-2 focus:ring-terracotta"
+                  />
+                  .000
+                  {s.price !== it.price && <span className="ml-1.5 italic text-brown/45">(menu {it.price}K)</span>}
+                </span>
+              </span>
+              <Switch on={s.on} pending={syncing} onClick={() => setItem(it.id, { on: !s.on })} label={`Jual ${it.name}`} />
+            </li>
+          )
+        })}
+      </ul>
+    </Card>
+  )
+}
+
+function Switch({ on, pending, onClick, label }: { on: boolean; pending: boolean; onClick: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      onClick={onClick}
+      className={`relative flex h-7 w-12 shrink-0 items-center rounded-full p-1 transition-colors ${on ? 'justify-end' : 'justify-start'} ${pending ? '' : on ? 'bg-leaf' : 'bg-brown/20'}`}
+      style={pending ? { background: WAIT } : undefined}
+    >
+      <motion.span layout transition={spring.snappy} className="grid size-5 place-items-center rounded-full bg-cream shadow">
+        {pending && <Loader2 className="size-3 animate-spin text-brown" />}
+      </motion.span>
+    </button>
+  )
+}
+
+/* ------------------------------------------------------------------ orders */
+
+/** 0812… / +62812… / 812… → 62812… for wa.me */
+const waLink = (wa: string, code: string) => {
+  let d = wa.replace(/\D/g, '')
+  if (d.startsWith('0')) d = '62' + d.slice(1)
+  else if (d.startsWith('8')) d = '62' + d
+  return `https://wa.me/${d}?text=${encodeURIComponent(`Halo kak! Dari Pletok, soal pre-order ${code} `)}`
+}
+
+function Orders({ orders, setDone }: { orders: Order[]; setDone: (code: string, done: boolean) => Promise<boolean> }) {
+  // ticked here, not confirmed by the Sheet yet → yellow
+  const [pending, setPending] = useState<Record<string, boolean>>({})
+  const [failed, setFailed] = useState<string | null>(null)
+  const [q, setQ] = useState('')
+  useEffect(() => {
+    setPending((p) => {
+      const left = Object.fromEntries(Object.entries(p).filter(([code, done]) => orders.find((o) => o.code === code)?.done !== done))
+      return Object.keys(left).length === Object.keys(p).length ? p : left
+    })
+  }, [orders])
+  const isDone = (o: Order) => pending[o.code] ?? o.done
+  const toggle = async (o: Order) => {
+    const next = !isDone(o)
+    setPending((p) => ({ ...p, [o.code]: next }))
+    setFailed(null)
+    if (!(await setDone(o.code, next))) {
+      setPending(({ [o.code]: _, ...rest }) => rest)
+      setFailed(o.code)
+    }
+  }
+
+  const doneCount = orders.filter(isDone).length
+  const revenue = orders.reduce((a, o) => a + o.total, 0)
+  // cups to make, split by what's still waiting for pickup
+  const prep = DRINKS.map((d) => {
+    const cups = (os: Order[]) => os.reduce((a, o) => a + o.lines.reduce((b, l) => b + l.qty * (PREORDER_ITEMS.find((i) => i.id === l.id)?.drinks.filter((x) => x === d.id).length ?? 0), 0), 0)
+    return { d, total: cups(orders), left: cups(orders.filter((o) => !isDone(o))) }
+  })
+  const needle = q.trim().toLowerCase()
+  const list = orders
+    .filter((o) => !needle || `${o.code} ${o.name} ${o.wa}`.toLowerCase().includes(needle))
+    .sort((a, b) => Number(a.done) - Number(b.done) || a.at - b.at)
+
+  return (
+    <Card
+      className="mt-4"
+      title={
+        <span className="flex items-center gap-2">
+          <ShoppingBag className="size-5 text-terracotta" /> Daftar pre-order
+        </span>
+      }
+      meta={failed ? `Gagal menandai ${failed} — coba lagi` : 'Ambil di booth · cocokkan kode + nama, lalu tandai selesai'}
+    >
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Tile Icon={ShoppingBag} label="Pesanan" value={orders.length} sub={`${doneCount} sudah diambil · ${orders.length - doneCount} menunggu`} />
+        <Tile Icon={Wallet} label="Total pre-order" value={rupiah(revenue)} sub="bayar di booth saat ambil" />
+        <div className="rounded-3xl border border-brown/10 bg-cream/80 p-5">
+          <span className="font-cond text-sm italic text-brown-soft">Cup yang perlu disiapkan</span>
+          <ul className="mt-2 space-y-1">
+            {prep.map(({ d, total, left }) => (
+              <li key={d.id} className="flex items-baseline justify-between gap-2 font-display text-sm">
+                <span className="font-semibold">{d.short}</span>
+                <span className="tabular-nums">
+                  <b className="text-lg">{left}</b> <span className="font-cond italic text-brown/55">sisa dari {total}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <label className="flex flex-1 items-center gap-2 rounded-full bg-cream-deep/70 px-4 py-2.5">
+          <Search className="size-4 text-brown/50" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari nama / kode / nomor" className="w-full bg-transparent font-cond outline-none" />
+        </label>
+        <Btn onClick={() => downloadOrders(orders)} icon={<Download className="size-4" />}>Unduh CSV</Btn>
+      </div>
+
+      {list.length === 0 ? (
+        <p className="py-8 text-center font-cond italic text-brown/55">{orders.length ? 'Tidak ada yang cocok' : 'Belum ada pre-order'}</p>
+      ) : (
+        <ul className="mt-3 divide-y divide-brown/10">
+          {list.map((o) => {
+            const done = isDone(o)
+            const syncing = o.code in pending
+            return (
+              <motion.li layout key={o.code} transition={spring.snappy} className={`flex flex-wrap items-center gap-x-4 gap-y-2 py-3 ${done && !syncing ? 'opacity-55' : ''}`}>
+                <button
+                  onClick={() => void toggle(o)}
+                  aria-pressed={done}
+                  aria-label={done ? `Batalkan selesai ${o.code}` : `Tandai ${o.code} selesai`}
+                  className={`grid size-9 shrink-0 place-items-center rounded-full border-2 transition-colors ${syncing ? 'border-transparent text-brown' : done ? 'border-leaf bg-leaf text-cream' : 'border-brown/25 text-transparent hover:border-leaf hover:text-leaf/50'}`}
+                  style={syncing ? { background: WAIT } : undefined}
+                >
+                  {syncing ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" strokeWidth={3} />}
+                </button>
+                <div className="min-w-0 flex-1 basis-56">
+                  <p className="font-display font-semibold">
+                    <span className="mr-2 rounded-md bg-brown px-1.5 py-0.5 font-cond text-sm tracking-wide text-cream">{o.code}</span>
+                    {o.name}
+                    <span className="ml-2 font-cond text-sm font-normal italic text-brown/55">{dayTime(o.at)}</span>
+                  </p>
+                  <p className="mt-0.5 font-cond text-brown-soft">{o.summary}</p>
+                  {o.note && <p className="font-cond text-sm italic text-terracotta">“{o.note}”</p>}
+                </div>
+                <span className="font-display font-bold tabular-nums">{rupiah(o.total)}</span>
+                <a href={waLink(o.wa, o.code)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-full bg-leaf px-3.5 py-2 font-display text-sm font-semibold text-cream">
+                  <MessageCircle className="size-4" /> Hubungi
+                </a>
+              </motion.li>
+            )
+          })}
+        </ul>
+      )}
+    </Card>
   )
 }
 
@@ -455,18 +785,30 @@ function PinGate({ wrong, onOk }: { wrong: boolean; onOk: (pin: string) => void 
   )
 }
 
-/** every answer as a CSV that Excel / Google Sheets / Docs open cleanly (BOM for Excel's UTF-8) */
-function downloadCsv(rs: Response[]) {
-  const head = ['Waktu', 'Rating', 'Menu favorit', 'Like', 'Wishes', 'Questions', 'Ideas', 'Nama', 'Kontak', 'Boleh dihubungi', 'Sumber']
+/** a CSV that Excel / Google Sheets / Docs open cleanly (BOM for Excel's UTF-8) */
+function saveCsv(file: string, head: string[], rows: unknown[][]) {
   const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
-  const lines = rs.map((r) => [dayTime(r.at), r.rating ?? '', r.favorites, r.like, r.wish, r.question, r.idea, r.name, r.consent ? r.contact : '', r.consent ? 'ya' : 'tidak', r.source].map(esc).join(','))
-  const blob = new Blob(['﻿' + [head.map(esc).join(','), ...lines].join('\n')], { type: 'text/csv;charset=utf-8' })
+  const blob = new Blob(['\ufeff' + [head, ...rows].map((r) => r.map(esc).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
-  a.download = `pletok-feedback-${new Date().toISOString().slice(0, 10)}.csv`
+  a.download = `${file}-${new Date().toISOString().slice(0, 10)}.csv`
   a.click()
   URL.revokeObjectURL(a.href)
 }
+
+const downloadCsv = (rs: Response[]) =>
+  saveCsv(
+    'pletok-feedback',
+    ['Waktu', 'Rating', 'Menu favorit', 'Like', 'Wishes', 'Questions', 'Ideas', 'Nama', 'Kontak', 'Boleh dihubungi', 'Sumber'],
+    rs.map((r) => [dayTime(r.at), r.rating ?? '', r.favorites, r.like, r.wish, r.question, r.idea, r.name, r.consent ? r.contact : '', r.consent ? 'ya' : 'tidak', r.source]),
+  )
+
+const downloadOrders = (os: Order[]) =>
+  saveCsv(
+    'pletok-preorder',
+    ['Waktu', 'Kode', 'Nama', 'WhatsApp', 'Pesanan', 'Total (Rp)', 'Catatan', 'Status'],
+    os.map((o) => [dayTime(o.at), o.code, o.name, o.wa, o.summary, o.total * 1000, o.note, o.done ? 'selesai' : 'baru']),
+  )
 
 function demoResults(): Results {
   const open = EVENT.open.getTime()
@@ -493,5 +835,20 @@ function demoResults(): Results {
       source: 'link',
     }
   })
-  return { sheetUrl: '#', responses, scans: Array.from({ length: 128 }, (_, i) => ({ at: open + i * 80_000, target: 'link' })) }
+  const names = ['Nadia', 'Raka', 'Salsa', 'Bima', 'Citra', 'Dimas', 'Aurel', 'Fikri']
+  const orders: Order[] = names.map((name, i) => {
+    const lines = [PREORDER_ITEMS[i % 6], ...(i % 3 ? [] : [PREORDER_ITEMS[(i + 2) % 6]])].map((it, j) => ({ id: it.id, name: it.name, qty: 1 + ((i + j) % 2), price: it.price }))
+    return {
+      at: open - (30 - i * 3) * 3_600_000,
+      code: `PLT-${String(i + 1).padStart(3, '0')}`,
+      name,
+      wa: `0812${String(10000000 + i * 1234567).slice(0, 8)}`,
+      summary: lines.map((l) => `${l.qty}× ${l.name}`).join(', '),
+      total: lines.reduce((a, l) => a + l.qty * l.price, 0),
+      note: i % 4 === 1 ? 'Less sugar ya kak' : '',
+      done: i < 2,
+      lines,
+    }
+  })
+  return { sheetUrl: '#', responses, orders, scans: Array.from({ length: 128 }, (_, i) => ({ at: open + i * 80_000, target: 'link' })) }
 }

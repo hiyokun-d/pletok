@@ -1,4 +1,4 @@
-import { motion, useAnimate } from 'motion/react'
+import { motion, useAnimate, useMotionTemplate, useMotionValue, useTransform } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import { LEAF_BOX, LETTERS, LOGO_BOX, LOGO_BROWN, TAGLINE, pct } from '../data/logo'
 import { Sprout, type SproutState } from './Sprout'
@@ -34,6 +34,11 @@ export function LogoRig({ play = 'static', interactive = true, showTagline = tru
   const [burst, setBurst] = useState<{ key: number; at: [number, number] }>()
   const fxRef = useRef<HTMLDivElement>(null)
   const leafRef = useRef<HTMLButtonElement>(null)
+  // the bloom mask radius as a motion value — Safari won't animate a CSS variable inside mask-image
+  const bloomR = useMotionValue(intro ? 0 : 170)
+  const bloomIn = useTransform(bloomR, (v) => v - 14)
+  const bloom = useMotionTemplate`radial-gradient(circle at ${LEAF_PT.x}% ${LEAF_PT.y}%, #000 ${bloomIn}%, transparent ${bloomR}%)`
+  const finished = useRef(false)
 
   useEffect(() => {
     if (!intro) return
@@ -52,20 +57,60 @@ export function LogoRig({ play = 'static', interactive = true, showTagline = tru
     }
   }, [intro, animate])
 
+  /** the intro's end state, applied directly — used if any browser stalls mid-sequence */
+  const snapToEnd = () => {
+    bloomR.set(170)
+    // through motion first (so it doesn't re-apply the close-up on the next render), then by hand
+    try {
+      animate('.cam', { scale: 1, x: '0%', y: '0%' }, { duration: 0 })
+    } catch {
+      /* fall through to the direct style below */
+    }
+    const root = scope.current as HTMLElement | null
+    const cam = root?.querySelector<HTMLElement>('.cam')
+    if (cam && getComputedStyle(cam).transform !== 'none' && cam.getBoundingClientRect().width > (root?.getBoundingClientRect().width ?? 0) * 1.5) cam.style.transform = 'none'
+    const tag = root?.querySelector<HTMLElement>('.tagline')
+    if (tag) {
+      tag.style.opacity = '1'
+      tag.style.clipPath = 'none'
+    }
+  }
+  const finish = () => {
+    if (finished.current) return
+    finished.current = true
+    onReady?.()
+  }
+
+  // watchdog: whatever happens (Safari, a dropped frame, a thrown animation) the intro ends
+  useEffect(() => {
+    if (!intro) return
+    const t = window.setTimeout(() => {
+      if (finished.current) return
+      snapToEnd()
+      finish()
+    }, 9000)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intro])
+
   const onGrown = async () => {
     setSprout('idle')
-    if (intro) {
-      // camera pulls back from the sprout while the wordmark blooms outward from the leaf
-      animate('.mark', { '--r': ['0%', '170%'] }, { duration: 1.25, ease: [0.5, 0, 0.25, 1], delay: 0.1 })
-      animate('.mark', { scale: [1.06, 1] }, { duration: 1.4, ease: [0.3, 0, 0.2, 1], delay: 0.1 })
-      await animate('.cam', { scale: [CLOSE_UP, 1], x: [`${50 - LEAF_PT.x}%`, '0%'], y: [`${50 - LEAF_PT.y}%`, '0%'] }, { duration: 1.3, ease: [0.7, 0, 0.2, 1] })
-      fireLeaves()
-      animate('.flash-ring', { scale: [0.2, 1.6], opacity: [0.5, 0] }, { duration: 0.9, ease: [0.2, 0.8, 0.3, 1] })
-      if (showTagline) {
-        await animate('.tagline', { clipPath: ['inset(0 50% 0 50%)', 'inset(0 0% 0 0%)'], opacity: [1, 1] }, { duration: 0.7, ease: [0.65, 0, 0.35, 1] })
-      }
-    } else fireLeaves()
-    onReady?.()
+    try {
+      if (intro) {
+        // camera pulls back from the sprout while the wordmark blooms outward from the leaf
+        animate(bloomR, 170, { duration: 1.25, ease: [0.5, 0, 0.25, 1], delay: 0.1 })
+        animate('.mark', { scale: [1.06, 1] }, { duration: 1.4, ease: [0.3, 0, 0.2, 1], delay: 0.1 })
+        await animate('.cam', { scale: [CLOSE_UP, 1], x: [`${50 - LEAF_PT.x}%`, '0%'], y: [`${50 - LEAF_PT.y}%`, '0%'] }, { duration: 1.3, ease: [0.7, 0, 0.2, 1] })
+        fireLeaves()
+        animate('.flash-ring', { scale: [0.2, 1.6], opacity: [0.5, 0] }, { duration: 0.9, ease: [0.2, 0.8, 0.3, 1] })
+        if (showTagline) {
+          await animate('.tagline', { clipPath: ['inset(0 50% 0 50%)', 'inset(0 0% 0 0%)'], opacity: [1, 1] }, { duration: 0.7, ease: [0.65, 0, 0.35, 1] })
+        }
+      } else fireLeaves()
+    } catch {
+      snapToEnd()
+    }
+    finish()
   }
 
   const fireLeaves = () => {
@@ -81,7 +126,6 @@ export function LogoRig({ play = 'static', interactive = true, showTagline = tru
     onLeafTap?.()
   }
 
-  const bloom = `radial-gradient(circle at ${LEAF_PT.x}% ${LEAF_PT.y}%, #000 calc(var(--r) - 14%), transparent var(--r))`
 
   return (
     <div ref={scope} className={`relative ${className}`} style={{ aspectRatio: `${LOGO_BOX.w} / ${LOGO_BOX.h}` }}>
@@ -124,7 +168,7 @@ export function LogoRig({ play = 'static', interactive = true, showTagline = tru
           aria-label="Pletok"
           viewBox={`${LOGO_BOX.x} ${LOGO_BOX.y} ${LOGO_BOX.w} ${LOGO_BOX.h}`}
           className={`mark absolute inset-0 h-full w-full overflow-visible ${interactive ? 'cursor-pointer' : ''}`}
-          style={intro ? ({ '--r': '0%', maskImage: bloom, WebkitMaskImage: bloom } as React.CSSProperties) : { originY: 1 }}
+          style={intro ? { maskImage: bloom, WebkitMaskImage: bloom } : { originY: 1 }}
           whileHover={interactive ? { y: '-3%', rotate: -1, transition: { type: 'spring', stiffness: 400, damping: 14 } } : undefined}
           whileTap={interactive ? { scaleY: 0.9, scaleX: 1.05 } : undefined}
         >

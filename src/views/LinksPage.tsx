@@ -1,10 +1,11 @@
 import { motion } from 'motion/react'
 import { useEffect } from 'react'
-import { ArrowUpRight, MapPin, MessageCircleHeart, UtensilsCrossed } from 'lucide-react'
+import { ArrowUpRight, MapPin, MessageCircleHeart, ShoppingBag, UtensilsCrossed } from 'lucide-react'
 import { EVENT, LINKS } from '../data/event'
 import { DRINKS, TAGLINE } from '../data/menu'
 import { logScan } from '../lib/backend'
 import { useFeedbackOpen } from '../hooks/useFeedbackOpen'
+import { usePreorder } from '../hooks/usePreorder'
 import { InstagramIcon } from '../components/InstagramIcon'
 import { WindLeaves } from '../components/WindLeaves'
 import logo from '../assets/logo.png'
@@ -12,7 +13,7 @@ import { spring } from '../lib/motion'
 
 let counted = false
 
-const ICONS = { feedback: MessageCircleHeart, instagram: InstagramIcon }
+const ICONS = { preorder: ShoppingBag, feedback: MessageCircleHeart, instagram: InstagramIcon }
 
 /**
  * Where the booth QR lands (/link): every link we have, feedback first. Opening it counts as
@@ -20,7 +21,12 @@ const ICONS = { feedback: MessageCircleHeart, instagram: InstagramIcon }
  */
 export function LinksPage() {
   const feedback = useFeedbackOpen().open
-  const links = LINKS.filter((l) => l.kind !== 'feedback' || feedback)
+  const preorder = usePreorder().open
+  const links = [
+    // pre-order sits on top while it's open (from the day an admin switches it on until H-1)
+    ...(preorder ? [{ kind: 'preorder' as const, label: 'Pre-order Pletok', sub: 'Pesan sekarang, ambil di booth — tanpa antre', href: '/preorder' }] : []),
+    ...LINKS.filter((l) => l.kind !== 'feedback' || feedback),
+  ]
   useEffect(() => {
     // once per page load (React may run effects twice in dev), and not when someone taps back here
     if (counted) return

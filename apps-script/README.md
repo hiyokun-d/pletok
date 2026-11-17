@@ -18,7 +18,13 @@ Every feedback, every QR scan and the sold-out state are saved in **one Google S
    - in Vercel → Project → Settings → Environment Variables: `VITE_BACKEND_URL` = that URL, then **Redeploy**;
    - locally, in `.env.local` (not committed): `VITE_BACKEND_URL=…`
 6. On the booth laptop, open **A + C**, enter the PIN, then press **Sambung**. Sold-out changes now reach every phone.
-7. Admins: open **`/hasil`** with the PIN to see results and to open or close the feedback form remotely. The switch is saved as the script property `FEEDBACK_MODE`.
+7. Admins: open **`/hasil`** with the PIN. From there you can:
+   - see the results;
+   - open or close the feedback form remotely (saved as the script property `FEEDBACK_MODE`);
+   - switch pre-order on or off, set the cut-off (24 Nov 23:59 WIB at the latest — it can be moved earlier, never into the event day; with pre-order switched on 18 Nov that is a 7-day window), and turn each item on or off or change its price (saved as `PREORDER`);
+   - see every pre-order. At pickup, match the code and name, tap ✓ to mark it done, and use **Hubungi** to WhatsApp a customer.
+
+   Every admin control turns **yellow with a spinner** while it waits for the Sheet, and goes back to normal once every phone sees the change.
 
 Changed `Code.gs` later? Go to **Deploy → Manage deployments → ✏️ → Version: New version → Deploy**. The URL stays the same.
 
@@ -28,6 +34,7 @@ Changed `Code.gs` later? Go to **Deploy → Manage deployments → ✏️ → Ve
 |---|---|---|
 | **Feedback** | one person | time, ID, rating 1–5, favourite drinks (can be several, e.g. "Original, Yakult"), **Like, Wishes, Questions, Ideas**, name, contact, OK to contact, source, device |
 | **Scans** | one QR scan | time, target (`link` = booth QR), device |
+| **Preorder** | one order | time, code (PLT-001…), ID, **name**, WhatsApp, order, total (Rp), note, status (`baru`/`selesai`), detail JSON |
 
 ## Exporting
 

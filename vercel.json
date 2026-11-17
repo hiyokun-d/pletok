@@ -16,6 +16,10 @@
     {
       "source": "/hasil",
       "destination": "/index.html"
+    },
+    {
+      "source": "/preorder",
+      "destination": "/index.html"
     }
   ]
 }

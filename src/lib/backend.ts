@@ -77,6 +77,7 @@ export interface RemoteStats {
   menu: { state: unknown; at: number } | null
   /** set from /hasil only; 'auto' = follow the schedule */
   feedbackMode?: 'auto' | 'open' | 'closed'
+  preorder?: PreorderConfig
 }
 
 export async function fetchStats(): Promise<RemoteStats | null> {
@@ -122,6 +123,7 @@ export interface Response {
 }
 export interface Results {
   sheetUrl: string
+  orders?: Order[]
   responses: Response[]
   scans: Array<{ at: number; target: string }>
 }
@@ -144,6 +146,56 @@ export async function setFeedbackModeRemote(pin: string, mode: 'auto' | 'open' |
   const ok = await post({ type: 'feedback-mode', pin, mode })
   if (ok) void pollOnce()
   return ok
+}
+
+/* ---------------------------------------------------------------- pre-order */
+
+/** prices in thousands (18 = Rp18.000) — what's on sale is decided by the Sheet, set from /hasil */
+export interface PreorderConfig {
+  enabled: boolean
+  /** epoch ms; orders close after this (default: end of 24 Nov WIB, H-1) */
+  cutoff: number
+  items: Record<string, { on: boolean; price: number }>
+}
+export interface Order {
+  at: number
+  code: string
+  name: string
+  wa: string
+  summary: string
+  total: number
+  note: string
+  done: boolean
+  lines: Array<{ id: string; name: string; qty: number; price: number }>
+}
+
+/** a POST whose answer we need (the order code) — retried a few times on a flaky connection */
+async function postJson<T>(p: Payload, tries = 3): Promise<(T & { ok: boolean; error?: string }) | null> {
+  if (!BACKEND) return null
+  for (let i = 0; i < tries; i++) {
+    try {
+      const r = await fetch(BACKEND, { method: 'POST', body: JSON.stringify(p) })
+      return (await r.json()) as T & { ok: boolean; error?: string }
+    } catch {
+      await new Promise((res) => window.setTimeout(res, 1200 * (i + 1)))
+    }
+  }
+  return null
+}
+
+export function submitPreorder(order: { id: string; items: Array<{ id: string; qty: number }>; name: string; wa: string; note: string; hp: string }) {
+  return postJson<{ code: string; total: number }>({ type: 'preorder', ...order })
+}
+
+export async function savePreorderConfig(pin: string, config: PreorderConfig): Promise<boolean> {
+  const r = await postJson({ type: 'preorder-config', pin, config })
+  if (r?.ok) void pollOnce()
+  return !!r?.ok
+}
+
+export async function setOrderDone(pin: string, code: string, done: boolean): Promise<boolean> {
+  const r = await postJson({ type: 'preorder-status', pin, code, done })
+  return !!r?.ok
 }
 
 export const pushMenu = (state: unknown) => {

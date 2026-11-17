@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Check, CloudOff, Frown, Heart, HelpCircle, Laugh, Lightbulb, Meh, Send, Smile, SmilePlus, Sparkles, ThumbsUp } from 'lucide-react'
+import { Check, CloudOff, Frown, Heart, HelpCircle, Laugh, Lightbulb, Meh, Send, Smile, SmilePlus, Sparkles, ThumbsUp } from 'lucide-react'
 import { DRINKS, type DrinkId } from '../data/menu'
 import { EVENT, INSTAGRAM_HANDLE, INSTAGRAM_URL } from '../data/event'
 import { BACKEND, enqueue, pendingCount } from '../lib/backend'
@@ -9,6 +9,7 @@ import { useFeedbackOpen } from '../hooks/useFeedbackOpen'
 import { trackClick } from '../lib/analytics'
 import { ParticleField } from '../components/ParticleField'
 import { PaperPlane } from '../components/PaperPlane'
+import { BackButton } from '../components/BackButton'
 import { InstagramIcon } from '../components/InstagramIcon'
 import { Sprout } from '../components/Sprout'
 import { spring } from '../lib/motion'
@@ -309,20 +310,6 @@ export function FeedbackPage() {
         )}
       </AnimatePresence>
     </main>
-  )
-}
-
-/** back to where they came from (the links page, usually) — or to /link on a fresh open */
-function BackButton({ className = '' }: { className?: string }) {
-  const back = () => {
-    const fromUs = document.referrer && new URL(document.referrer).origin === window.location.origin
-    if (fromUs && window.history.length > 1) window.history.back()
-    else window.location.href = '/link'
-  }
-  return (
-    <button type="button" onClick={back} className={`inline-flex w-fit items-center gap-1.5 rounded-full bg-cream-deep/80 px-3.5 py-2 font-display text-sm font-semibold text-brown ${className}`}>
-      <ArrowLeft className="size-4" /> Kembali
-    </button>
   )
 }
 
