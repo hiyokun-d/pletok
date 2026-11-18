@@ -1,7 +1,7 @@
 import { motion } from 'motion/react'
 import { useEffect } from 'react'
-import { ArrowUpRight, MapPin, MessageCircleHeart, ShoppingBag, UtensilsCrossed } from 'lucide-react'
-import { EVENT, LINKS } from '../data/event'
+import { ArrowUpRight, Headset, MapPin, MessageCircleHeart, ShoppingBag, UtensilsCrossed } from 'lucide-react'
+import { ADMIN_NAME, ADMIN_WA, EVENT, LINKS } from '../data/event'
 import { DRINKS, TAGLINE } from '../data/menu'
 import { logScan } from '../lib/backend'
 import { useFeedbackOpen } from '../hooks/useFeedbackOpen'
@@ -13,6 +13,12 @@ import logo from '../assets/logo.png'
 import { spring } from '../lib/motion'
 
 let counted = false
+
+/** 6285930460492 → +62 859-3046-0492 */
+const prettyWa = (wa: string) => `+${wa.slice(0, 2)} ${wa.slice(2, 5)}-${wa.slice(5, 9)}-${wa.slice(9)}`
+// the admin doubles as customer service (same number as on /preorder) — a chat opens with a hello
+const CS_HREF = `https://wa.me/${ADMIN_WA}?text=${encodeURIComponent('Halo Pletok! Aku mau tanya…')}`
+const csName = ADMIN_NAME.charAt(0) + ADMIN_NAME.slice(1).toLowerCase()
 
 const ICONS = { preorder: ShoppingBag, feedback: MessageCircleHeart, instagram: InstagramIcon }
 
@@ -99,6 +105,35 @@ export function LinksPage() {
               <span className="block font-cond text-sm italic text-brown-soft">harga, paket hemat, asal-usul</span>
             </span>
           </motion.a>
+          {ADMIN_WA && (
+            <motion.a
+              href={CS_HREF}
+              target="_blank"
+              rel="noreferrer"
+              data-track="link-cs"
+              className="group flex items-center gap-4 rounded-3xl border-2 border-leaf/40 bg-cream/80 p-4"
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ ...spring.snappy, delay: 0.15 + (links.length + 1) * 0.08 }}
+              whileTap={{ scale: 0.97 }}
+            >
+              <span className="relative grid size-12 shrink-0 place-items-center rounded-2xl bg-leaf text-cream">
+                <Headset className="size-6" />
+                {/* "someone's here" dot */}
+                <span className="absolute -right-0.5 -top-0.5 flex size-3">
+                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-[#8faa4f] opacity-75" />
+                  <span className="relative inline-flex size-3 rounded-full border-2 border-cream bg-[#8faa4f]" />
+                </span>
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-display text-lg font-bold leading-tight">Customer Service</span>
+                <span className="block truncate font-cond text-sm italic text-brown-soft">
+                  WhatsApp {prettyWa(ADMIN_WA)}{ADMIN_NAME && ` · ${csName}`}
+                </span>
+              </span>
+              <ArrowUpRight className="size-5 shrink-0 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+            </motion.a>
+          )}
         </div>
 
         <p className="mt-8 font-cond text-sm italic text-brown/45">
