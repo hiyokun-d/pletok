@@ -8,6 +8,8 @@
  *   POST {type:'preorder', ...}  → a row in "Preorder", on hold (no pickup code yet) + a kode cek
  *   POST {type:'preorder-lookup', ids} / {type:'preorder-find', ref | wa+name} → the customer's own orders
  *   POST {type:'preorder-status', pin, id, status?, sent?} → verify (hands out PLT-001, PLT-002…), picked up, rejected
+ *   POST {type:'preorder-pay', id, pay:'BCA'|'QRIS'} → how the customer is paying (only while on hold)
+ *   POST {type:'money-holders', pin, money:{bca,qris,tunai}} → who holds each pot of money (/hasil)
  *   POST {type:'preorder-proof', id, image} → the transfer screenshot into Drive, named after the customer
  *   POST {type:'preorder-proof-get', pin, id} → that screenshot, for /hasil
  *   POST {type:'wipe', pin, what:['orders','booth','feedback','scans','security','proofs']} → clear test data (backs up first)
@@ -64,7 +66,15 @@ const loose_ = (t) => String(t).toLowerCase().replace(/[^a-z0-9]/g, '')
 // what the customer's phone may know about an order: the pickup code only once it's paid
 function orderPublic_(r) {
   const st = statusOf_(r[8])
-  return { id: String(r[2]), ref: String(r[13] || ''), status: st, code: st === 'process' || st === 'done' ? String(r[1]) : '', total: Number(r[6]) / 1000, name: String(r[3]), at: new Date(r[0]).getTime(), lines: JSON.parse(String(r[9]) || '[]'), proof: !!r[14], promo: Number(r[15]) / 1000 || 0 }
+  return { id: String(r[2]), ref: String(r[13] || ''), status: st, code: st === 'process' || st === 'done' ? String(r[1]) : '', total: Number(r[6]) / 1000, name: String(r[3]), at: new Date(r[0]).getTime(), lines: JSON.parse(String(r[9]) || '[]'), proof: !!r[14], promo: Number(r[15]) / 1000 || 0, pay: payOf_(r[10]) }
+}
+// pre-orders are paid by BCA transfer or the GoPay Merchant QRIS
+const payOf_ = (v) => (String(v).toUpperCase() === 'QRIS' ? 'QRIS' : 'BCA')
+// who holds each pot of money — names only, crew-only (never in the public stats)
+function moneyHolders_() {
+  const raw = PropertiesService.getScriptProperties().getProperty('MONEY')
+  const m = raw ? JSON.parse(raw) : {}
+  return { bca: String(m.bca || ''), qris: String(m.qris || ''), tunai: String(m.tunai || '') }
 }
 // next pickup code: PLT- + a running number, so the cashier only types the digits ("007").
 // It counts every code ever given (older "nama-003" style too), so it never repeats. Being easy to
@@ -291,6 +301,24 @@ function doPost(e) {
       return json_({ ok: true, orders: hits.slice(-5).map(orderPublic_) })
     }
 
+    // the hold screen: the customer switched between BCA and QRIS — once it's verified it's the crew's call
+    if (b.type === 'preorder-pay') {
+      const sh = orderSheet_()
+      const i = orderRows_(sh).map((r) => String(r[2])).indexOf(String(b.id))
+      if (i === -1) return json_({ ok: false, error: 'id' })
+      if (statusOf_(sh.getRange(i + 2, 9).getValue()) !== 'hold') return json_({ ok: false, error: 'status' })
+      sh.getRange(i + 2, 11).setValue(payOf_(b.pay))
+      return json_({ ok: true })
+    }
+
+    // admin (/hasil): the names of whoever holds the BCA account, the QRIS (GoPay Merchant) and the cash
+    if (b.type === 'money-holders') {
+      if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
+      const m = b.money || {}
+      props.setProperty('MONEY', JSON.stringify({ bca: clip_(m.bca, 60).trim(), qris: clip_(m.qris, 60).trim(), tunai: clip_(m.tunai, 60).trim() }))
+      return json_({ ok: true })
+    }
+
     // admin (/hasil): what's on sale, prices, open/closed, cut-off
     if (b.type === 'preorder-config') {
       if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
@@ -325,6 +353,7 @@ function doPost(e) {
         sh.getRange(i + 2, 9).setValue(STATUS[b.status])
       }
       if (typeof b.sent === 'boolean') sh.getRange(i + 2, 13).setValue(b.sent ? 'ya' : '')
+      if (b.pay) sh.getRange(i + 2, 11).setValue(payOf_(b.pay))
       return json_({ ok: true, code: code })
     }
 
@@ -442,7 +471,7 @@ function doPost(e) {
       if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
       const po = orderRows_(orderSheet_())
         .filter((r) => ['process', 'done'].indexOf(statusOf_(r[8])) !== -1)
-        .map((r) => ({ src: 'po', id: String(r[2]), code: String(r[1]), name: String(r[3]), at: new Date(r[0]).getTime(), total: Number(r[6]) / 1000, pay: 'BCA', note: String(r[7]), done: statusOf_(r[8]) === 'done', lines: JSON.parse(String(r[9]) || '[]') }))
+        .map((r) => ({ src: 'po', id: String(r[2]), code: String(r[1]), name: String(r[3]), at: new Date(r[0]).getTime(), total: Number(r[6]) / 1000, pay: payOf_(r[10]), note: String(r[7]), done: statusOf_(r[8]) === 'done', lines: JSON.parse(String(r[9]) || '[]') }))
       const booth = boothRows_(boothSheet_())
         .filter((r) => String(r[7]) !== BOOTH_STATUS.void)
         .map((r) => ({ src: 'booth', id: String(r[2]), code: String(r[1]), name: String(r[3]), at: new Date(r[0]).getTime(), total: Number(r[5]) / 1000, pay: String(r[6]), note: String(r[9]), done: String(r[7]) === BOOTH_STATUS.done, lines: JSON.parse(String(r[8]) || '[]') }))
@@ -482,6 +511,7 @@ function doPost(e) {
       return json_({
         ok: true,
         sheetUrl: ss.getUrl(),
+        money: moneyHolders_(),
         security: secRows.reverse().map((r) => ({ at: new Date(r[0]).getTime(), what: String(r[1]), from: String(r[2]), ua: String(r[3]), detail: String(r[4]) })),
         responses: rows.map((r) => ({
           at: new Date(r[0]).getTime(), rating: Number(r[2]) || null, favorites: String(r[3]),
@@ -492,7 +522,7 @@ function doPost(e) {
         orders: orderRows_(orderSheet_()).map((r) => ({
           at: new Date(r[0]).getTime(), code: String(r[1]), id: String(r[2]), name: String(r[3]), wa: String(r[4]), summary: String(r[5]),
           total: Number(r[6]) / 1000, note: String(r[7]), status: statusOf_(r[8]), lines: JSON.parse(String(r[9]) || '[]'),
-          pay: String(r[10] || 'BCA'), sender: String(r[11] || ''), sent: r[12] === 'ya', ref: String(r[13] || ''), proof: String(r[14] || ''), promo: Number(r[15]) / 1000 || 0,
+          pay: payOf_(r[10]), sender: String(r[11] || ''), sent: r[12] === 'ya', ref: String(r[13] || ''), proof: String(r[14] || ''), promo: Number(r[15]) / 1000 || 0,
         })),
       })
     }

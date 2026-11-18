@@ -1,11 +1,12 @@
 import { AnimatePresence, motion, useAnimate } from 'motion/react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Banknote, Check, Copy, Landmark, Loader2, Minus, Plus, QrCode, ReceiptText, RotateCcw, ShoppingBasket, TriangleAlert, X } from 'lucide-react'
+import { Banknote, Check, Copy, Gift, Landmark, Loader2, Minus, Plus, QrCode, ReceiptText, RotateCcw, ShoppingBasket, TriangleAlert, X } from 'lucide-react'
 import { BACKEND, crewPin, fetchQueue, sendBoothOrder, voidBoothOrder, type BoothLine, type BoothPay, type QueueOrder } from '../lib/backend'
 import { usePreorder } from '../hooks/usePreorder'
 import { useMenu } from '../hooks/useMenu'
 import { rupiah } from '../data/preorder'
 import { ParticleField } from '../components/ParticleField'
+import { QrisCode } from '../components/QrisCode'
 import { Card, CrewNav, Empty, PinGate, Shell, hhmm, useCrewPage } from './adminUi'
 
 /*
@@ -26,6 +27,15 @@ interface SellItem {
   images: string[]
   soldOut: boolean
 }
+/** a row of the bill — a bundle whose cups were swapped is its own row, "duo-klasik|original,original" */
+interface Line extends SellItem {
+  cartKey: string
+  qty: number
+  custom: boolean
+}
+const sameMix = (a: string[], b: string[]) => [...a].sort().join() === [...b].sort().join()
+/** a bundle as the buyer wants it: its own key, or the plain one when it's the default mix */
+const mixKey = (b: SellItem, drinks: string[]) => (sameMix(drinks, b.drinks) ? b.key : `${b.key}|${drinks.join(',')}`)
 
 export function CashierPage() {
   const [pin, setPin] = useState(crewPin)
@@ -52,15 +62,59 @@ export function CashierPage() {
   const [done, setDone] = useState<{ code: string; name: string; at: number } | null>(null)
   const [history, setHistory] = useState<QueueOrder[] | null>(null)
 
-  const lines = items.filter((i) => (cart[i.key] ?? 0) > 0)
-  const total = lines.reduce((t, i) => t + i.price * cart[i.key], 0)
-  const cups = lines.reduce((n, i) => n + cart[i.key] * i.drinks.length, 0)
+  const drinkOf = (id: string) => menu.drinks.find((d) => d.id === id)
+  const lines: Line[] = Object.entries(cart)
+    .filter(([, n]) => n > 0)
+    .flatMap(([cartKey, qty]) => {
+      const [base, mix] = cartKey.split('|')
+      const it = items.find((i) => i.key === base)
+      if (!it) return []
+      const drinks = mix ? mix.split(',') : it.drinks
+      const names = drinks.map((id) => drinkOf(id)?.short ?? id).join(' + ')
+      return [{ ...it, cartKey, qty, custom: !!mix, drinks, images: drinks.map((id) => drinkOf(id)?.image ?? ''), name: mix ? `${it.name} (${names})` : it.name }]
+    })
+    // menu order, the default mix before its swapped versions
+    .sort((a, b) => items.findIndex((i) => a.key === i.key) - items.findIndex((i) => b.key === i.key) || Number(a.custom) - Number(b.custom))
+  const total = lines.reduce((t, i) => t + i.price * i.qty, 0)
+  const cups = lines.reduce((n, i) => n + i.qty * i.drinks.length, 0)
+  // the QR waits until the cashier stops tapping, so the buyer never scans a half-made bill —
+  // until then it shimmers (its loading state) and builds itself the moment the total settles
+  const [qrTotal, setQrTotal] = useState(total)
+  useEffect(() => {
+    const t = window.setTimeout(() => setQrTotal(total), 350)
+    return () => window.clearTimeout(t)
+  }, [total])
   const received = Number(cash) || 0
   const change = received - total
+
+  const deals = useMemo(() => bundleDeals(items, cart), [items, cart])
+  // one tap: the loose drinks leave the bill, the bundle takes their place
+  const takeDeal = (d: Deal) =>
+    setCart((c) => {
+      const k = mixKey(d.bundle, d.drinks)
+      const next = { ...c, [k]: (c[k] ?? 0) + d.times }
+      d.drinks.forEach((id) => (next[id] = Math.max(0, (next[id] ?? 0) - d.times)))
+      return next
+    })
+  // tap a cup in a bundle row → every flavour shows under it, tap the one they want (no cycling:
+  // rows only move once the pick is made). One bundle of that row moves to its new mix
+  // (a row of 3 becomes 2 + 1); back to the default mix and it rejoins the plain row
+  const [picking, setPicking] = useState<{ cartKey: string; slot: number } | null>(null)
+  const setCup = (l: Line, slot: number, id: string) => {
+    setPicking(null)
+    if (l.drinks[slot] === id) return
+    const drinks = [...l.drinks]
+    drinks[slot] = id
+    const k = mixKey(l, drinks)
+    setCart((c) => ({ ...c, [l.cartKey]: (c[l.cartKey] ?? 0) - 1, [k]: (c[k] ?? 0) + 1 }))
+  }
+  /** how many of this menu tile are in the bill, swapped mixes included */
+  const inBill = (key: string) => lines.filter((l) => l.key === key).reduce((t, l) => t + l.qty, 0)
 
   const bump = (key: string, d: number) => setCart((c) => ({ ...c, [key]: Math.max(0, Math.min(50, (c[key] ?? 0) + d)) }))
   const reset = () => {
     setCart({})
+    setPicking(null)
     setName('')
     setCash('')
     setPay('tunai')
@@ -85,7 +139,7 @@ export function CashierPage() {
     if (pay === 'tunai' && cash && change < 0) return setError('Uang yang diterima kurang dari total.')
     setSending(true)
     setError(null)
-    const order: BoothLine[] = lines.map((i) => ({ id: i.key, name: i.name, qty: cart[i.key], price: i.price, drinks: i.drinks }))
+    const order: BoothLine[] = lines.map((i) => ({ id: i.key, name: i.name, qty: i.qty, price: i.price, drinks: i.drinks }))
     const r = await sendBoothOrder(pin, { id: orderId, lines: order, pay, name: name.trim(), note: '' })
     setSending(false)
     if (r === 'pin') return setPin(null), setWrong(true)
@@ -115,7 +169,7 @@ export function CashierPage() {
           </h1>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {items.map((i, k) => (
-              <SellTile key={i.key} item={i} n={cart[i.key] ?? 0} index={k} onAdd={() => bump(i.key, 1)} />
+              <SellTile key={i.key} item={i} n={inBill(i.key)} index={k} onAdd={() => bump(i.key, 1)} />
             ))}
           </div>
         </section>
@@ -130,18 +184,67 @@ export function CashierPage() {
               <ul className="mt-2 flex flex-col gap-2">
                 <AnimatePresence initial={false}>
                   {lines.map((i) => (
-                    <motion.li key={i.key} layout initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} className="flex items-center gap-2 font-display">
-                      <span className="min-w-0 flex-1 truncate">{i.name}</span>
-                      <button type="button" aria-label={`Kurangi ${i.name}`} onClick={() => bump(i.key, -1)} className="grid size-8 place-items-center rounded-full bg-cream-deep">
-                        <Minus className="size-4" />
-                      </button>
-                      <motion.span key={cart[i.key]} initial={{ scale: 1.4 }} animate={{ scale: 1 }} className="w-6 text-center font-bold tabular-nums">
-                        {cart[i.key]}
-                      </motion.span>
-                      <button type="button" aria-label={`Tambah ${i.name}`} onClick={() => bump(i.key, 1)} className="grid size-8 place-items-center rounded-full bg-brown text-cream">
-                        <Plus className="size-4" />
-                      </button>
-                      <span className="w-20 text-right tabular-nums">{rupiah(i.price * cart[i.key])}</span>
+                    <motion.li key={i.cartKey} layout initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} className="font-display">
+                      <div className="flex items-center gap-2">
+                        <span className="min-w-0 flex-1 truncate">
+                          {i.drinks.length > 1 ? items.find((x) => x.key === i.key)?.name : i.name}
+                          {i.custom && <span className="ml-1.5 rounded-full bg-yakult/40 px-1.5 py-0.5 align-middle font-cond text-xs font-semibold italic">isi bebas</span>}
+                        </span>
+                        <button type="button" aria-label={`Kurangi ${i.name}`} onClick={() => bump(i.cartKey, -1)} className="grid size-8 place-items-center rounded-full bg-cream-deep">
+                          <Minus className="size-4" />
+                        </button>
+                        <motion.span key={i.qty} initial={{ scale: 1.4 }} animate={{ scale: 1 }} className="w-6 text-center font-bold tabular-nums">
+                          {i.qty}
+                        </motion.span>
+                        <button type="button" aria-label={`Tambah ${i.name}`} onClick={() => bump(i.cartKey, 1)} className="grid size-8 place-items-center rounded-full bg-brown text-cream">
+                          <Plus className="size-4" />
+                        </button>
+                        <span className="w-20 text-right tabular-nums">{rupiah(i.price * i.qty)}</span>
+                      </div>
+                      {/* a bundle's cups: tap one, then pick its flavour (same bundle price) */}
+                      {i.drinks.length > 1 && (
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          {i.drinks.map((id, slot) => {
+                            const open = picking?.cartKey === i.cartKey && picking.slot === slot
+                            return (
+                              <button
+                                key={slot}
+                                type="button"
+                                onClick={() => setPicking(open ? null : { cartKey: i.cartKey, slot })}
+                                aria-expanded={open}
+                                aria-label={`Cup ${slot + 1}: ${drinkOf(id)?.short ?? id} — ganti rasa`}
+                                className={`flex items-center gap-1 rounded-full border py-0.5 pl-0.5 pr-2 text-xs font-semibold transition-colors ${open ? 'border-brown bg-brown text-cream' : 'border-brown/20 bg-cream-deep/60'}`}
+                              >
+                                <img src={drinkOf(id)?.image} alt="" className="h-5 w-auto" />
+                                {drinkOf(id)?.short ?? id}
+                              </button>
+                            )
+                          })}
+                          {!picking || picking.cartKey !== i.cartKey ? <span className="font-cond text-xs italic text-brown/50">tap cup buat ganti rasa</span> : null}
+                        </div>
+                      )}
+                      <AnimatePresence initial={false}>
+                        {picking?.cartKey === i.cartKey && (
+                          <motion.div key="pick" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.15 }} className="overflow-hidden">
+                            <div className="mt-1.5 grid grid-cols-3 gap-1.5 rounded-2xl bg-brown/10 p-1.5">
+                              {menu.drinks.map((d) => {
+                                const now = i.drinks[picking.slot] === d.id
+                                return (
+                                  <button
+                                    key={d.id}
+                                    type="button"
+                                    onClick={() => setCup(i, picking.slot, d.id)}
+                                    className={`flex min-h-14 flex-col items-center justify-center rounded-xl px-1 py-1.5 text-center text-xs font-semibold leading-tight ${now ? 'bg-brown text-cream' : 'bg-cream'}`}
+                                  >
+                                    <img src={d.image} alt="" className="h-8 w-auto" />
+                                    {d.short}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </motion.li>
                   ))}
                 </AnimatePresence>
@@ -153,6 +256,38 @@ export function CashierPage() {
                 {rupiah(total)}
               </motion.span>
             </div>
+
+            {/* loose drinks that make a bundle → tell the buyer, swap in one tap */}
+            <AnimatePresence initial={false}>
+              {deals.map((d) => (
+                <motion.div
+                  key={mixKey(d.bundle, d.drinks)}
+                  layout
+                  initial={{ opacity: 0, height: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, height: 'auto', scale: 1 }}
+                  exit={{ opacity: 0, height: 0, scale: 0.9 }}
+                  transition={{ type: 'spring', stiffness: 420, damping: 28 }}
+                  className="overflow-hidden"
+                >
+                  <div className="mt-3 flex items-center gap-3 rounded-2xl bg-leaf p-3 text-cream shadow-[0_4px_0_#3f5426]">
+                    <motion.span className="grid size-10 shrink-0 place-items-center rounded-xl bg-cream/15" initial={{ rotate: -20, scale: 0.5 }} animate={{ rotate: [0, -14, 10, 0], scale: 1 }} transition={{ duration: 0.6 }}>
+                      <Gift className="size-5" />
+                    </motion.span>
+                    <span className="min-w-0 flex-1 font-display leading-tight">
+                      <span className="block text-sm text-cream/80">Tawarin paket! {d.names}</span>
+                      <b>
+                        {d.times > 1 ? `${d.times}× ` : ''}
+                        {d.bundle.name}
+                        {!sameMix(d.drinks, d.bundle.drinks) && ' (isi bebas)'} · hemat {rupiah(d.save)}
+                      </b>
+                    </span>
+                    <motion.button type="button" whileTap={{ scale: 0.92 }} onClick={() => takeDeal(d)} className="shrink-0 rounded-full bg-cream px-3.5 py-2 font-display text-sm font-bold text-leaf">
+                      Ganti ke paket
+                    </motion.button>
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
 
             <input
               value={name}
@@ -222,6 +357,20 @@ export function CashierPage() {
               )}
             </AnimatePresence>
 
+            <AnimatePresence initial={false}>
+              {pay === 'qris' && total > 0 && (
+                <motion.div key="qris" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                  {/* the buyer scans this straight off the screen — the amount is already in it */}
+                  <div className="mt-3 rounded-2xl bg-brown p-3 text-cream">
+                    <p className="text-center font-cond text-sm italic text-cream/70">Arahkan ke pembeli · nominal sudah terisi</p>
+                    <p className="text-center font-display text-3xl font-bold tabular-nums">{rupiah(total)}</p>
+                    <QrisCode total={qrTotal || total} loading={qrTotal !== total || sending} className="mx-auto mt-2 max-w-72" />
+                    <p className="mt-2 text-center font-cond text-sm italic text-cream/80">Tunggu notif "pembayaran masuk" {rupiah(total)} di GoPay Merchant, baru tekan lunas</p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {error && (
               <p className="mt-3 flex items-start gap-2 rounded-2xl bg-terracotta/10 p-3 font-display text-sm text-terracotta">
                 <TriangleAlert className="mt-0.5 size-4 shrink-0" /> {error}
@@ -281,6 +430,62 @@ export function CashierPage() {
       </AnimatePresence>
     </Shell>
   )
+}
+
+interface Deal {
+  bundle: SellItem
+  /** the cups going in — the bundle's own mix, or the buyer's loose picks */
+  drinks: string[]
+  times: number
+  /** thousands saved in total */
+  save: number
+  /** "Original + Yakult" — what to say to the buyer */
+  names: string
+}
+/**
+ * Loose drinks in the bill that make a bundle for less, each drink used once. The bundles' own
+ * mixes first, biggest saving first (the trio before the duos). Whatever's left still makes a
+ * bundle of the same size, filled with what they picked (Original + Original → a duo, isi bebas).
+ */
+function bundleDeals(items: SellItem[], cart: Record<string, number>): Deal[] {
+  const single = (id: string) => items.find((i) => i.drinks.length === 1 && i.drinks[0] === id)
+  const short = (id: string) => single(id)?.name.replace(/^Pletok /, '') ?? id
+  const worth = (drinks: string[]) => drinks.reduce((t, id) => t + (single(id)?.price ?? 0), 0)
+  const left: Record<string, number> = {}
+  items.forEach((i) => i.drinks.length === 1 && (left[i.drinks[0]] = cart[i.key] ?? 0))
+  const bundles = items.filter((b) => b.drinks.length > 1 && !b.soldOut)
+  const deals: Deal[] = []
+
+  bundles
+    .map((b) => ({ b, gain: worth(b.drinks) - b.price }))
+    .filter((x) => x.gain > 0)
+    .sort((a, b) => b.gain - a.gain)
+    .forEach(({ b, gain }) => {
+      const times = Math.min(...b.drinks.map((id) => left[id] ?? 0))
+      if (!(times > 0)) return
+      b.drinks.forEach((id) => (left[id] -= times))
+      deals.push({ bundle: b, drinks: b.drinks, times, save: gain * times, names: b.drinks.map(short).join(' + ') })
+    })
+
+  // the leftovers, priciest first, into the cheapest bundle of each size (biggest size first)
+  const loose = Object.entries(left)
+    .flatMap(([id, n]) => Array<string>(Math.max(0, n)).fill(id))
+    .sort((a, b) => (single(b)?.price ?? 0) - (single(a)?.price ?? 0))
+  const bySize = [...new Set(bundles.map((b) => b.drinks.length))].sort((a, b) => b - a)
+  for (const size of bySize) {
+    const b = bundles.filter((x) => x.drinks.length === size).sort((x, y) => x.price - y.price)[0]
+    while (loose.length >= size) {
+      const drinks = loose.slice(0, size)
+      if (worth(drinks) - b.price <= 0) break
+      loose.splice(0, size)
+      const same = deals.find((d) => d.bundle === b && sameMix(d.drinks, drinks))
+      if (same) {
+        same.times++
+        same.save += worth(drinks) - b.price
+      } else deals.push({ bundle: b, drinks, times: 1, save: worth(drinks) - b.price, names: drinks.map(short).join(' + ') })
+    }
+  }
+  return deals
 }
 
 /** a big tappable menu tile; the cup hops and a "+1" floats off on every tap */

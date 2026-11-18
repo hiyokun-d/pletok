@@ -3,9 +3,10 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'reac
 import { ArrowLeft, ArrowRight, Ban, Check, Gift, CheckCircle2, ChevronDown, Copy, Hourglass, ImageUp, KeyRound, Landmark, Loader2, MapPin, MessageCircle, Phone, QrCode, RefreshCw, Search, ShieldAlert, XCircle } from 'lucide-react'
 import { ADMIN_NAME, ADMIN_WA, EVENT } from '../data/event'
 import { rupiah } from '../data/preorder'
-import { findOrders, lookupOrders, uploadProof, type OrderStatus, type PreorderConfig, type Promo, type PublicOrder } from '../lib/backend'
+import { findOrders, lookupOrders, setPreorderPay, uploadProof, type OrderStatus, type PreorderConfig, type PreorderPay, type Promo, type PublicOrder } from '../lib/backend'
 import { spring } from '../lib/motion'
 import { ParticleField } from './ParticleField'
+import { QrisCode } from './QrisCode'
 import { Morph } from './Morph'
 
 /* ------------------------------------------------------------------ the phone's own orders */
@@ -26,6 +27,8 @@ export interface MyOrder {
   proof?: boolean
   /** first-N promo discount (thousands) the Sheet gave, already off `total` */
   promo?: number
+  /** BCA transfer or QRIS — picked on the hold screen */
+  pay?: PreorderPay
   /** the screen promised a promo slot but they were all gone by the time the order landed */
   promoMissed?: boolean | 'used'
 }
@@ -62,7 +65,7 @@ export function useMyOrders() {
       const next = [...os]
       found.forEach((f) => {
         const i = next.findIndex((o) => o.id === f.id)
-        const o: MyOrder = { ...(i >= 0 ? next[i] : { saved: 0 }), id: f.id, at: f.at, name: f.name, total: f.total, lines: f.lines, status: f.status, code: f.code, ref: f.ref, proof: f.proof, promo: f.promo }
+        const o: MyOrder = { ...(i >= 0 ? next[i] : { saved: 0 }), id: f.id, at: f.at, name: f.name, total: f.total, lines: f.lines, status: f.status, code: f.code, ref: f.ref, proof: f.proof, promo: f.promo, pay: f.pay }
         if (i >= 0) next[i] = o
         else next.push(o)
       })
@@ -90,7 +93,7 @@ export function useMyOrders() {
       const next = os.flatMap((o) => {
         const u = r.find((x) => x.id === o.id)
         if (!u) return ids.includes(o.id) ? [] : [o]
-        return [{ ...o, status: u.status, total: u.total || o.total, code: u.code || o.code, ref: u.ref || o.ref, proof: u.proof || o.proof, promo: u.promo ?? o.promo }]
+        return [{ ...o, status: u.status, total: u.total || o.total, code: u.code || o.code, ref: u.ref || o.ref, proof: u.proof || o.proof, promo: u.promo ?? o.promo, pay: u.pay ?? o.pay }]
       })
       store(next)
       return next
@@ -529,11 +532,18 @@ function AutoCheck({ at }: { at?: number }) {
 /* ------------------------------------------------------------------ the tracker */
 
 /**
- * One order, live: while it's on hold it shows how to pay (BCA now, QRIS soon) and waits;
+ * One order, live: while it's on hold it shows how to pay (BCA transfer or QRIS) and waits;
  * the moment an admin verifies the transfer, it turns into the pickup code.
  */
 export function OrderTracker({ order, config, onBack, onProof, checkedAt }: { order: MyOrder; config: PreorderConfig; onBack: () => void; onProof: () => void; checkedAt?: number }) {
   const bca = config.bca ?? { number: '', holder: '' }
+  // the Sheet hears which one they picked, so the crew knows where to look for the money
+  const [pay, setPay] = useState<PreorderPay>(order.pay ?? 'BCA')
+  const pick = (p: PreorderPay) => {
+    if (p === pay) return
+    setPay(p)
+    setPreorderPay(order.id, p)
+  }
   const verified = order.status === 'process' || order.status === 'done'
   // celebrate the moment it turns verified while they're looking (not on every visit)
   const [burst, setBurst] = useState<number>()
@@ -588,7 +598,7 @@ export function OrderTracker({ order, config, onBack, onProof, checkedAt }: { or
         ) : (
           <motion.div key="pay" className="flex w-full flex-col items-center" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, filter: 'blur(8px)' }}>
             <h1 className="mt-4 font-display text-3xl font-bold">Tinggal bayar</h1>
-            <p className="mt-1 max-w-sm font-display text-brown-soft">Transfer persis sejumlah ini, lalu tunggu sebentar — kode ambilmu muncul di sini setelah kami cek.</p>
+            <p className="mt-1 max-w-sm font-display text-brown-soft">Bayar persis sejumlah ini lewat transfer BCA atau QRIS, lalu tunggu sebentar — kode ambilmu muncul di sini setelah kami cek.</p>
             {!!order.promo && (
               <motion.p
                 className="mt-3 inline-flex items-center gap-2 rounded-full bg-leaf px-4 py-1.5 font-display text-sm font-semibold text-cream shadow-[0_4px_0_#3f5426]"
@@ -607,41 +617,59 @@ export function OrderTracker({ order, config, onBack, onProof, checkedAt }: { or
             )}
 
             <div className="mt-5 w-full max-w-sm rounded-3xl bg-brown p-5 text-cream">
-              <p className="font-cond text-sm italic text-cream/70">Total transfer</p>
+              <p className="font-cond text-sm italic text-cream/70">Total bayar</p>
               <div className="mt-1 flex items-center justify-between gap-3">
                 <span className="font-display text-4xl font-bold tabular-nums">{rupiah(order.total)}</span>
                 <CopyBtn text={String(order.total * 1000)} label="Salin total" />
               </div>
             </div>
 
-            <div className="mt-3 w-full max-w-sm rounded-3xl border-2 border-brown/15 bg-cream p-5 text-left">
-              <p className="flex items-center gap-2 font-display font-bold">
-                <Landmark className="size-5 text-terracotta" /> Transfer BCA
-              </p>
-              {bca.number ? (
-                <>
-                  <div className="mt-2 flex items-center justify-between gap-3">
-                    <span className="font-display text-2xl font-bold tracking-wider tabular-nums">{bca.number}</span>
-                    <CopyBtn text={bca.number.replace(/\D/g, '')} label="Salin nomor rekening" />
-                  </div>
-                  {bca.holder && <p className="font-cond italic text-brown-soft">a.n. {bca.holder}</p>}
-                </>
+            <div className="mt-3 grid w-full max-w-sm grid-cols-2 gap-1 rounded-2xl bg-brown/10 p-1">
+              {(['BCA', 'QRIS'] as const).map((p) => (
+                <button key={p} type="button" onClick={() => pick(p)} aria-pressed={pay === p} className="relative flex items-center justify-center gap-2 rounded-xl py-2.5 font-display font-semibold">
+                  {pay === p && <motion.span layoutId="po-pay" className="absolute inset-0 rounded-xl bg-brown" transition={spring.snappy} />}
+                  <span className={`relative flex items-center gap-2 ${pay === p ? 'text-cream' : ''}`}>
+                    {p === 'BCA' ? <Landmark className="size-4" /> : <QrCode className="size-4" />} {p === 'BCA' ? 'Transfer BCA' : 'QRIS'}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <AnimatePresence mode="wait" initial={false}>
+              {pay === 'BCA' ? (
+                <motion.div key="bca" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="mt-3 w-full max-w-sm rounded-3xl border-2 border-brown/15 bg-cream p-5 text-left">
+                  <p className="flex items-center gap-2 font-display font-bold">
+                    <Landmark className="size-5 text-terracotta" /> Transfer BCA
+                  </p>
+                  {bca.number ? (
+                    <>
+                      <div className="mt-2 flex items-center justify-between gap-3">
+                        <span className="font-display text-2xl font-bold tracking-wider tabular-nums">{bca.number}</span>
+                        <CopyBtn text={bca.number.replace(/\D/g, '')} label="Salin nomor rekening" />
+                      </div>
+                      {bca.holder && <p className="font-cond italic text-brown-soft">a.n. {bca.holder}</p>}
+                    </>
+                  ) : (
+                    <p className="mt-2 font-display font-semibold text-terracotta">[nomor rekening belum diisi admin — tanya admin dulu ya]</p>
+                  )}
+                </motion.div>
               ) : (
-                <p className="mt-2 font-display font-semibold text-terracotta">[nomor rekening belum diisi admin — tanya admin dulu ya]</p>
+                <motion.div key="qris" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="mt-3 w-full max-w-sm rounded-3xl border-2 border-brown/15 bg-cream p-5">
+                  <p className="flex items-center gap-2 text-left font-display font-bold">
+                    <QrCode className="size-5 text-terracotta" /> QRIS · semua e-wallet & m-banking
+                  </p>
+                  <QrisCode total={order.total} save className="mx-auto mt-3 max-w-64" />
+                  <p className="mt-3 text-left font-cond text-sm italic text-brown-soft">Buka di HP ini? Simpan gambarnya, lalu di GoPay / DANA / OVO / ShopeePay / m-banking pilih <b>Scan → dari galeri</b>. Nominal {rupiah(order.total)} sudah terisi otomatis.</p>
+                </motion.div>
               )}
-            </div>
-            <div className="mt-3 flex w-full max-w-sm items-center gap-3 rounded-3xl border-2 border-dashed border-brown/15 p-4 text-left opacity-60">
-              <QrCode className="size-6 shrink-0" />
-              <span className="flex-1 font-display font-semibold">QRIS</span>
-              <span className="rounded-full bg-brown/10 px-2.5 py-0.5 font-cond text-sm italic">segera</span>
-            </div>
+            </AnimatePresence>
 
             <ProofUpload order={order} onDone={onProof} />
             <NoScam />
             <NoRefund className="mt-3 w-full max-w-sm" />
 
             <ol className="mt-5 w-full max-w-sm space-y-2 text-left font-display text-brown-soft">
-              {['Transfer persis sejumlah total di atas.', 'Upload screenshot bukti transfernya di sini.', 'Tim Pletok cek — halaman ini ikut berubah sendiri.', 'Kode ambil muncul di sini & kami kirim lewat WhatsApp.'].map((t, i) => (
+              {[pay === 'QRIS' ? 'Scan QRIS di atas (nominal sudah terisi), lalu bayar.' : 'Transfer persis sejumlah total di atas.', 'Upload screenshot bukti bayarnya di sini.', 'Tim Pletok cek — halaman ini ikut berubah sendiri.', 'Kode ambil muncul di sini & kami kirim lewat WhatsApp.'].map((t, i) => (
                 <li key={i} className="flex gap-3">
                   <span className="grid size-6 shrink-0 place-items-center rounded-full bg-terracotta font-display text-sm font-bold text-cream">{i + 1}</span>
                   {t}

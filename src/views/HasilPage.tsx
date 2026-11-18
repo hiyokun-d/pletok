@@ -1,10 +1,10 @@
 import { motion } from 'motion/react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Check, Crown, Download, ExternalLink, HelpCircle, Hourglass, ImageIcon, Lightbulb, Loader2, MessageCircle, MessageCircleHeart, PackageCheck, RefreshCw, ScanLine, Search, Send, Settings2, ShieldAlert, ShoppingBag, Sparkles, Star, ThumbsUp, Undo2, Users, Wallet, X } from 'lucide-react'
+import { ArrowRight, Banknote, Check, Coins, Crown, Landmark, QrCode, Download, ExternalLink, HelpCircle, Hourglass, ImageIcon, Lightbulb, Loader2, MessageCircle, MessageCircleHeart, PackageCheck, RefreshCw, ScanLine, Search, Send, Settings2, ShieldAlert, ShoppingBag, Sparkles, Star, ThumbsUp, Undo2, Users, Wallet, X } from 'lucide-react'
 import { EVENT, SITE_URL } from '../data/event'
 import { DRINKS } from '../data/menu'
 import { AnimatePresence } from 'motion/react'
-import { BACKEND, crewPin, fetchProof, fetchResults, updateOrder, type Order, type OrderStatus, type Response, type Results, type SecurityEvent } from '../lib/backend'
+import { BACKEND, crewPin, fetchProof, fetchQueue, fetchResults, saveMoneyHolders, updateOrder, type MoneyHolders, type Order, type OrderStatus, type PreorderPay, type QueueOrder, type Response, type Results, type SecurityEvent } from '../lib/backend'
 import { usePreorder } from '../hooks/usePreorder'
 import { PREORDER_ITEMS, rupiah } from '../data/preorder'
 import { spring } from '../lib/motion'
@@ -35,7 +35,9 @@ export function HasilPage() {
   const [data, setData] = useState<Results | null>(DEMO ? demoResults() : null)
   const [state, setState] = useState<'idle' | 'loading' | 'error' | 'pin'>('idle')
   const [at, setAt] = useState<number | undefined>(DEMO ? Date.now() : undefined)
-  const preorderOpen = usePreorder().open
+  // booth sales (/cashier), for the money cards — voided ones never come back
+  const [booth, setBooth] = useState<QueueOrder[] | null>(DEMO ? demoBooth() : null)
+  const { open: preorderOpen, config } = usePreorder()
   useCrewPage('Hasil')
 
   const load = useCallback(async () => {
@@ -48,6 +50,8 @@ export function HasilPage() {
       return
     }
     if (!r) return setState('error')
+    const q = await fetchQueue(pin)
+    if (Array.isArray(q)) setBooth(q.filter((o) => o.src === 'booth'))
     setData(r)
     setAt(Date.now())
     setState('idle')
@@ -89,6 +93,20 @@ export function HasilPage() {
         </div>
       </header>
 
+      {data && (
+        <Money
+          orders={data.orders ?? []}
+          booth={booth}
+          holders={data.money ?? { bca: '', qris: '', tunai: '' }}
+          bcaName={config.bca?.holder ?? ''}
+          save={async (money) => {
+            const ok = DEMO ? (await wait(800), true) : await saveMoneyHolders(pin, money)
+            if (ok) setData((d) => (d ? { ...d, money } : d))
+            return ok
+          }}
+        />
+      )}
+
       {data?.orders && (
         <Orders
           orders={data.orders}
@@ -112,6 +130,103 @@ export function HasilPage() {
       )}
       {data && <Summary data={data} />}
     </Shell>
+  )
+}
+
+/* ------------------------------------------------------------------ money */
+
+type Pot = keyof MoneyHolders
+const POTS: Array<{ id: Pot; label: string; Icon: typeof Landmark; where: string }> = [
+  { id: 'bca', label: 'Transfer BCA', Icon: Landmark, where: 'rekening BCA' },
+  { id: 'qris', label: 'QRIS', Icon: QrCode, where: 'GoPay Merchant' },
+  { id: 'tunai', label: 'Tunai', Icon: Banknote, where: 'kotak uang' },
+]
+/** booth rows say 'Tunai' / 'QRIS' / 'Transfer BCA'; pre-orders say 'BCA' / 'QRIS' */
+const potOf = (pay: string): Pot => (/qris/i.test(pay) ? 'qris' : /bca/i.test(pay) ? 'bca' : 'tunai')
+
+/**
+ * Where the money is: everything paid (verified pre-orders + booth sales that weren't cancelled),
+ * split by the pot it landed in, each with the crew member who holds it — so settling up after
+ * the event is one look, not a hunt through three apps.
+ */
+function Money({ orders, booth, holders, bcaName, save }: { orders: Order[]; booth: QueueOrder[] | null; holders: MoneyHolders; bcaName: string; save: (m: MoneyHolders) => Promise<boolean> }) {
+  const po = orders.filter((o) => o.status === 'process' || o.status === 'done')
+  const sums = POTS.map((p) => {
+    const a = po.filter((o) => potOf(o.pay) === p.id)
+    const b = (booth ?? []).filter((o) => potOf(o.pay) === p.id)
+    const pre = a.reduce((t, o) => t + o.total, 0)
+    const walk = b.reduce((t, o) => t + o.total, 0)
+    return { ...p, pre, walk, sum: pre + walk, n: a.length + b.length }
+  })
+  const total = sums.reduce((t, p) => t + p.sum, 0)
+  const missing = POTS.filter((p) => !holders[p.id].trim())
+
+  return (
+    <Card
+      className="mt-8"
+      title={<span className="flex items-center gap-2"><Coins className="size-5 text-terracotta" /> Uang masuk</span>}
+      meta={booth ? 'Pre-order terverifikasi + penjualan booth (yang dibatalkan tidak dihitung)' : 'Penjualan booth belum termuat — angka booth menyusul'}
+    >
+      {missing.length > 0 && (
+        <p className="mb-3 flex items-start gap-2 rounded-2xl px-4 py-3 font-display text-sm text-brown" style={{ background: `${WAIT}55` }}>
+          <ShieldAlert className="mt-0.5 size-4 shrink-0" />
+          <span>
+            <b>Tulis nama crew yang pegang uangnya</b> — belum ada untuk {missing.map((p) => p.label).join(', ')}. Biar jelas siapa yang setor & bagi hasil nanti.
+          </span>
+        </p>
+      )}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-3xl bg-brown p-5 text-cream">
+          <span className="flex items-center gap-2 font-cond text-sm italic text-cream/70"><Wallet className="size-4" /> Total sekarang</span>
+          <p className="mt-1 font-display text-4xl font-bold tabular-nums leading-none">{rupiah(total)}</p>
+          <p className="mt-1.5 font-cond text-xs italic text-cream/70">{sums.reduce((t, p) => t + p.n, 0)} transaksi · semua akun</p>
+        </div>
+        {sums.map((p) => (
+          <div key={p.id} className="rounded-3xl border border-brown/10 bg-cream/80 p-5">
+            <span className="flex items-center gap-2 font-cond text-sm italic text-brown-soft"><p.Icon className="size-4 text-terracotta" /> {p.label}</span>
+            <p className="mt-1 font-display text-3xl font-bold tabular-nums leading-none">{rupiah(p.sum)}</p>
+            <p className="mt-1.5 font-cond text-xs italic text-brown/55">
+              {p.n} transaksi · pre-order {rupiah(p.pre)} · booth {rupiah(p.walk)}
+              {p.id === 'bca' && bcaName && ` · rek a.n. ${bcaName}`}
+            </p>
+            <Holder pot={p} holders={holders} save={save} />
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+/** "dipegang oleh" — typed in place, saved to the Sheet on Enter / leaving the field */
+function Holder({ pot, holders, save }: { pot: { id: Pot; where: string }; holders: MoneyHolders; save: (m: MoneyHolders) => Promise<boolean> }) {
+  const saved = holders[pot.id]
+  const [draft, setDraft] = useState(saved)
+  const [state, setState] = useState<'idle' | 'saving' | 'error'>('idle')
+  useEffect(() => setDraft(saved), [saved])
+  const commit = async () => {
+    const v = draft.trim()
+    if (v === saved || state === 'saving') return
+    setState('saving')
+    setState((await save({ ...holders, [pot.id]: v })) ? 'idle' : 'error')
+  }
+  const empty = !draft.trim()
+  return (
+    <label className="mt-3 block">
+      <span className="font-cond text-xs italic text-brown/55">Dipegang oleh ({pot.where})</span>
+      <span className="mt-1 flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: state === 'saving' || draft.trim() !== saved ? `${WAIT}66` : empty ? `${WAIT}33` : 'rgb(90 46 26 / 0.06)', boxShadow: empty ? `inset 0 0 0 2px ${WAIT}` : undefined }}>
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value.slice(0, 60))}
+          onBlur={() => void commit()}
+          onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()}
+          placeholder="Tulis nama crew…"
+          className="min-w-0 flex-1 bg-transparent font-display text-sm font-semibold outline-none placeholder:font-normal placeholder:text-brown/45"
+        />
+        {state === 'saving' && <Loader2 className="size-4 animate-spin" />}
+        {state === 'idle' && !empty && draft.trim() === saved && <Check className="size-4 text-leaf" />}
+      </span>
+      {state === 'error' && <span className="font-cond text-xs italic text-terracotta">Gagal menyimpan — cek sinyal, lalu coba lagi</span>}
+    </label>
   )
 }
 
@@ -158,7 +273,7 @@ const contactMessage = (o: Order) =>
       ? `Halo kak ${o.name}! Dari Pletok, soal pre-order kamu: ${o.summary} (${rupiah(o.total)})${o.ref ? `, kode cek *${o.ref}*` : ''}.\n\nTransfernya belum kami temukan — boleh kirim bukti transfernya di sini?\n\n${PICKUP}${statusLink(o)}`
       : `Halo kak ${o.name}! Dari Pletok, soal pre-order *${o.code}*: ${o.summary}.\n\n${PICKUP}${statusLink(o)}`
 
-type Patch = { status?: OrderStatus; sent?: boolean }
+type Patch = { status?: OrderStatus; sent?: boolean; pay?: PreorderPay }
 /** same as nextCode_ in Code.gs — for the demo only */
 const pickupCode = (_name: string, n: number) => `PLT-${String(n).padStart(3, '0')}`
 type Proof = { image: string; name: string; url: string }
@@ -182,7 +297,7 @@ function Orders({ orders, update, preorderOpen, loadProof }: { orders: Order[]; 
       const left = Object.fromEntries(
         Object.entries(p).filter(([id, patch]) => {
           const o = orders.find((x) => x.id === id)
-          return o && ((patch.status && o.status !== patch.status) || (patch.sent !== undefined && o.sent !== patch.sent))
+          return o && ((patch.status && o.status !== patch.status) || (patch.sent !== undefined && o.sent !== patch.sent) || (patch.pay && o.pay !== patch.pay))
         }),
       )
       return Object.keys(left).length === Object.keys(p).length ? p : left
@@ -223,7 +338,7 @@ function Orders({ orders, update, preorderOpen, loadProof }: { orders: Order[]; 
           <ShoppingBag className="size-5 text-terracotta" /> Daftar pre-order
         </span>
       }
-      meta={failed ? `Gagal menyimpan ${failed} — coba lagi` : preorderOpen ? 'Pre-order masih buka · Hold di atas: cek mutasi BCA, lalu Verifikasi' : 'Pre-order tutup · Process di atas: yang harus dibuat & diambil'}
+      meta={failed ? `Gagal menyimpan ${failed} — coba lagi` : preorderOpen ? 'Pre-order masih buka · Hold di atas: cek mutasi BCA / notif GoPay Merchant (QRIS), lalu Verifikasi' : 'Pre-order tutup · Process di atas: yang harus dibuat & diambil'}
     >
       <div className="grid gap-3 sm:grid-cols-3">
         <Tile Icon={Hourglass} label="Perlu dicek (hold)" value={count('hold')} sub={`${orders.length} pesanan · ${count('rejected')} ditolak`} />
@@ -279,7 +394,10 @@ function Orders({ orders, update, preorderOpen, loadProof }: { orders: Order[]; 
                   </p>
                   <p className="mt-0.5 font-cond text-brown-soft">{o.summary}</p>
                   <p className="font-cond text-sm italic text-brown/60">
-                    {o.pay}
+                    {/* the customer picks it; tap to fix it when they paid the other way */}
+                    <button type="button" onClick={() => void act(o, { pay: o.pay === 'QRIS' ? 'BCA' : 'QRIS' })} title="Ganti BCA / QRIS" className="rounded-full border border-brown/20 px-2 py-0.5 font-display text-xs font-semibold not-italic text-brown">
+                      {o.pay === 'QRIS' ? 'QRIS' : 'BCA'} ⇄
+                    </button>
                     {o.ref && ` · kode cek ${o.ref}`}
                     {!!o.promo && <b className="font-semibold not-italic text-leaf"> · promo −{rupiah(o.promo)}</b>}
                     {o.sender && ` · pengirim: ${o.sender}`}
@@ -658,6 +776,11 @@ function SecurityCard({ events }: { events: SecurityEvent[] }) {
       )}
     </Card>
   )
+}
+
+function demoBooth(): QueueOrder[] {
+  const pays = ['Tunai', 'QRIS', 'Tunai', 'Transfer BCA', 'QRIS', 'Tunai']
+  return pays.map((pay, i) => ({ src: 'booth', id: `b${i}`, code: `B-00${i + 1}`, name: '', at: Date.now() - i * 600_000, total: [20, 35, 18, 52, 20, 40][i], pay, note: '', done: i > 2, lines: [] }))
 }
 
 function demoResults(): Results {

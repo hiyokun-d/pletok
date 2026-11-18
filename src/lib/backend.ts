@@ -141,6 +141,8 @@ export interface SecurityEvent {
 }
 export interface Results {
   sheetUrl: string
+  /** who holds each pot of money — written on /hasil */
+  money?: MoneyHolders
   /** newest first: wrong PINs and visits to the fake /admin */
   security?: SecurityEvent[]
   orders?: Order[]
@@ -229,6 +231,8 @@ export interface PublicOrder {
   lines: Array<{ id: string; name: string; qty: number; price: number }>
   /** a transfer screenshot is uploaded */
   proof: boolean
+  /** BCA transfer or QRIS (older Sheet: missing → BCA) */
+  pay?: PreorderPay
   /** first-N promo discount (thousands), already taken off `total` */
   promo?: number
 }
@@ -288,8 +292,25 @@ export async function wipeData(pin: string, what: WipeTarget[]) {
   return r?.ok ? r.done : null
 }
 
+/** how a pre-order was paid — the customer picks it on the hold screen, an admin can correct it */
+export type PreorderPay = 'BCA' | 'QRIS'
+/** the customer switched between BCA and QRIS while it's on hold — fire and forget */
+export function setPreorderPay(id: string, pay: PreorderPay) {
+  void postJson({ type: 'preorder-pay', id, pay }, 2)
+}
+
+/** the crew member who holds each pot: the BCA account, the GoPay Merchant (QRIS), the cash box */
+export interface MoneyHolders {
+  bca: string
+  qris: string
+  tunai: string
+}
+export async function saveMoneyHolders(pin: string, money: MoneyHolders): Promise<boolean> {
+  return !!(await postJson({ type: 'money-holders', pin, money }, 2))?.ok
+}
+
 /** admin: move an order along (verifying hands out its code) and/or mark the code as sent */
-export async function updateOrder(pin: string, id: string, patch: { status?: OrderStatus; sent?: boolean }): Promise<boolean> {
+export async function updateOrder(pin: string, id: string, patch: { status?: OrderStatus; sent?: boolean; pay?: PreorderPay }): Promise<boolean> {
   const r = await postJson({ type: 'preorder-status', pin, id, ...patch })
   return !!r?.ok
 }
