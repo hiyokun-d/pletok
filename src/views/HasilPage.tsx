@@ -1,10 +1,10 @@
 import { motion } from 'motion/react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Check, Crown, Download, ExternalLink, HelpCircle, Hourglass, ImageIcon, Lightbulb, Loader2, MessageCircle, MessageCircleHeart, PackageCheck, RefreshCw, ScanLine, Search, Send, Settings2, ShoppingBag, Sparkles, Star, ThumbsUp, Undo2, Users, Wallet, X } from 'lucide-react'
+import { ArrowRight, Check, Crown, Download, ExternalLink, HelpCircle, Hourglass, ImageIcon, Lightbulb, Loader2, MessageCircle, MessageCircleHeart, PackageCheck, RefreshCw, ScanLine, Search, Send, Settings2, ShieldAlert, ShoppingBag, Sparkles, Star, ThumbsUp, Undo2, Users, Wallet, X } from 'lucide-react'
 import { EVENT, SITE_URL } from '../data/event'
 import { DRINKS } from '../data/menu'
 import { AnimatePresence } from 'motion/react'
-import { BACKEND, crewPin, fetchProof, fetchResults, updateOrder, type Order, type OrderStatus, type Response, type Results } from '../lib/backend'
+import { BACKEND, crewPin, fetchProof, fetchResults, updateOrder, type Order, type OrderStatus, type Response, type Results, type SecurityEvent } from '../lib/backend'
 import { usePreorder } from '../hooks/usePreorder'
 import { PREORDER_ITEMS, rupiah } from '../data/preorder'
 import { spring } from '../lib/motion'
@@ -428,6 +428,8 @@ function Summary({ data }: { data: Results }) {
         })}
       </div>
 
+      <SecurityCard events={data?.security ?? []} />
+
       <Card title="Boleh dihubungi" meta={`${contacts.length} orang · rahasia tim`} className="mt-4">
         {contacts.length ? (
           <div className="overflow-x-auto">
@@ -612,6 +614,34 @@ const downloadOrders = (os: Order[]) =>
     ['Waktu', 'Kode', 'Kode cek', 'Nama', 'WhatsApp', 'Pesanan', 'Total (Rp)', 'Catatan', 'Status', 'Bayar via', 'Nama rekening pengirim', 'Kode terkirim', 'Promo (Rp)'],
     os.map((o) => [dayTime(o.at), o.code, o.ref, o.name, o.wa, o.summary, o.total * 1000, o.note, STATUS_LABEL[o.status], o.pay, o.sender, o.sent ? 'ya' : '', (o.promo ?? 0) * 1000]),
   )
+
+/** wrong PINs and visits to the fake /admin — the newest first */
+function SecurityCard({ events }: { events: SecurityEvent[] }) {
+  const hour = events.filter((e) => e.at > Date.now() - 3600_000).length
+  return (
+    <Card
+      title={<span className="flex items-center gap-2"><ShieldAlert className={`size-5 ${hour ? 'text-terracotta' : 'text-leaf'}`} /> Keamanan</span>}
+      meta={hour ? `${hour} kejadian 1 jam terakhir` : 'aman — tab "Keamanan" di Sheet'}
+      className={`mt-4 ${hour ? 'border-terracotta/40' : ''}`}
+    >
+      {events.length ? (
+        <ul className="flex flex-col divide-y divide-brown/10 font-display text-sm">
+          {events.slice(0, 15).map((e, i) => (
+            <li key={i} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-2">
+              <span className={`font-semibold ${e.what.startsWith('Coba') ? 'text-terracotta' : ''}`}>{e.what}</span>
+              <span className="text-brown-soft">{e.from}</span>
+              <span className="font-cond italic text-brown/55">{e.detail}</span>
+              <span className="ml-auto text-brown/55">{dayTime(e.at)}</span>
+              <span className="w-full truncate font-cond text-xs italic text-brown/45">{e.ua}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="font-cond italic text-brown/55">Belum ada yang coba-coba. PIN salah & yang buka /admin palsu bakal muncul di sini.</p>
+      )}
+    </Card>
+  )
+}
 
 function demoResults(): Results {
   const open = EVENT.open.getTime()

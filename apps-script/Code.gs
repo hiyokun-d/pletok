@@ -10,7 +10,12 @@
  *   POST {type:'preorder-status', pin, id, status?, sent?} → verify (hands out PLT-001, PLT-002…), picked up, rejected
  *   POST {type:'preorder-proof', id, image} → the transfer screenshot into Drive, named after the customer
  *   POST {type:'preorder-proof-get', pin, id} → that screenshot, for /hasil
- *   POST {type:'wipe', pin, what:['orders','feedback','scans','proofs']} → clear test data (backs up first)
+ *   POST {type:'wipe', pin, what:['orders','booth','feedback','scans','security','proofs']} → clear test data (backs up first)
+ *   POST {type:'pin', pin} → is this the crew PIN (one PIN for /hasil, /config, /cashier, /pickup)
+ *   POST {type:'booth-order' | 'booth-void', pin, …} → a walk-in sale in "Kasir" (B-001, B-002…)
+ *   POST {type:'queue', pin} / {type:'pickup', pin, src, id, done} → the pickup counter's list, handed over
+ *   POST {type:'trap', path, ua, tries} → someone tried the fake /admin page ("Keamanan" tab)
+ * Every wrong PIN is logged in "Keamanan" and answered 3 s late (one at a time).
  *   GET  ?stats=1                → numbers for the closing screen + current menu state
  *
  * Exports: the data is just a Sheet — File → Download (.xlsx / .csv / .pdf), or
@@ -118,16 +123,53 @@ function promoOf_(p) {
   return { on: !!p.on, slots: Math.max(1, Math.min(200, Math.round(Number(p.slots) || 10))), mode: p.mode === 'pct' ? 'pct' : 'rp', value: Math.max(0, Math.min(p.mode === 'pct' ? 50 : 100, Math.round(Number(p.value) || 0))) }
 }
 const promoTaken_ = (rows) => rows.filter((r) => Number(r[15]) > 0 && statusOf_(r[8]) !== 'rejected')
-/** discount in thousands for an order of `total` (thousands); 0 when off, full, or this number already had one */
-function promoFor_(promo, rows, total, wa) {
-  if (!promo.on || !promo.value) return 0
+/** discount in thousands for an order of `total` (thousands) as {off, why: '' | 'off' | 'full' | 'used'} — why tells the customer what happened when there's no discount */
+function promoCheck_(promo, rows, total, wa) {
+  if (!promo.on || !promo.value) return { off: 0, why: 'off' }
   const taken = promoTaken_(rows)
-  if (taken.length >= promo.slots) return 0
-  if (taken.some((r) => digits_(r[4]) === digits_(wa))) return 0
+  if (taken.some((r) => digits_(r[4]) === digits_(wa))) return { off: 0, why: 'used' }
+  if (taken.length >= promo.slots) return { off: 0, why: 'full' }
   const off = promo.mode === 'pct' ? Math.round((total * promo.value) / 100) : promo.value
-  return Math.max(0, Math.min(off, total - 1))
+  return { off: Math.max(0, Math.min(off, total - 1)), why: '' }
+}
+/* someone who ordered, didn't pay yet and orders again (changed their mind, lost the page) keeps their
+   promo: it moves off the old unpaid order — that one goes back to the normal pre-order total */
+function promoReclaim_(sh, rows, wa) {
+  rows.forEach((r, i) => {
+    if (Number(r[15]) > 0 && statusOf_(r[8]) === 'hold' && !r[14] && digits_(r[4]) === digits_(wa)) {
+      sh.getRange(i + 2, 7).setValue(Number(r[6]) + Number(r[15]))
+      sh.getRange(i + 2, 16).setValue(0)
+      r[6] = Number(r[6]) + Number(r[15])
+      r[15] = 0
+    }
+  })
 }
 
+
+/* ---- the booth's own sales (/cashier), separate from pre-orders so /hasil and the promo stay as they are */
+const BOOTH_COLS = ['Waktu', 'Kode', 'ID', 'Nama', 'Pesanan', 'Total (Rp)', 'Bayar', 'Status', 'Detail (JSON)', 'Catatan', 'Diambil']
+const BOOTH_STATUS = { process: 'diproses', done: 'selesai', void: 'batal' }
+const boothSheet_ = () => sheet_('Kasir', BOOTH_COLS)
+const boothRows_ = (sh) => (sh.getLastRow() < 2 ? [] : sh.getRange(2, 1, sh.getLastRow() - 1, BOOTH_COLS.length).getValues())
+
+/* ---- one crew PIN (CREW_PIN) opens every crew page. A wrong one is written to "Keamanan" and answered
+   3 s late — while holding the script lock, so guesses go one at a time: trying every 6-digit PIN
+   would take weeks, not minutes. */
+const SECURITY_COLS = ['Waktu', 'Kejadian', 'Dari', 'Perangkat', 'Detail']
+function allowed_(b) {
+  if (b.pin && String(b.pin) === PropertiesService.getScriptProperties().getProperty('CREW_PIN')) return true
+  securityLog_('PIN salah', clip_(b.type, 30), b.ua, b.pin ? String(b.pin).length + ' digit' : 'kosong')
+  Utilities.sleep(3000)
+  return false
+}
+/** at most 60 rows per 10 minutes, so nobody can flood the Sheet through it */
+function securityLog_(what, from, ua, detail) {
+  const cache = CacheService.getScriptCache()
+  const n = Number(cache.get('sec-n') || 0)
+  if (n >= 60) return
+  cache.put('sec-n', String(n + 1), 600)
+  sheet_('Keamanan', SECURITY_COLS).appendRow([new Date(), what, clip_(from, 60), clip_(ua, 200), clip_(detail, 120)])
+}
 
 function sheet_(name, cols) {
   const ss = SpreadsheetApp.getActiveSpreadsheet()
@@ -174,7 +216,7 @@ function doPost(e) {
     }
 
     if (b.type === 'menu') {
-      if (!b.pin || b.pin !== props.getProperty('CREW_PIN')) return json_({ ok: false, error: 'pin' })
+      if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
       props.setProperty('MENU', JSON.stringify({ state: b.state, at: Date.now() }))
       CacheService.getScriptCache().remove('stats')
       return json_({ ok: true })
@@ -182,7 +224,7 @@ function doPost(e) {
 
     // admin (/hasil): open / close the feedback form for every phone — 'auto' follows the schedule
     if (b.type === 'feedback-mode') {
-      if (!b.pin || b.pin !== props.getProperty('CREW_PIN')) return json_({ ok: false, error: 'pin' })
+      if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
       if (['auto', 'open', 'closed'].indexOf(b.mode) === -1) return json_({ ok: false, error: 'mode' })
       props.setProperty('FEEDBACK_MODE', b.mode)
       CacheService.getScriptCache().remove('stats')
@@ -214,13 +256,15 @@ function doPost(e) {
       const prev = rows.filter((r) => r[2] === b.id)[0]
       if (prev) return json_({ ok: true, status: statusOf_(prev[8]), total: Number(prev[6]) / 1000, ref: String(prev[13] || ''), promo: Number(prev[15]) / 1000 || 0 })
       // first-N promo, decided here (under the lock) — the total below is what they transfer
-      const promo = promoFor_(cfg.promo, rows, total, wa)
+      if (cfg.promo.on) promoReclaim_(sh, rows, wa)
+      const pc = promoCheck_(cfg.promo, rows, total, wa)
+      const promo = pc.off
       const pay = total - promo
       // no pickup code yet: it waits on hold until an admin finds the transfer
       const ref = newRef_(rows)
       sh.appendRow([now, '', clip_(b.id, 64), name, "'" + wa, lines.map((l) => l.qty + '× ' + l.name).join(', '), pay * 1000, clip_(b.note, 300), STATUS.hold, JSON.stringify(lines), 'BCA', clip_(b.sender, 80), '', ref, '', promo * 1000])
       if (promo) CacheService.getScriptCache().remove('stats') // slots left changes for everyone
-      return json_({ ok: true, status: 'hold', total: pay, ref: ref, promo: promo })
+      return json_({ ok: true, status: 'hold', total: pay, ref: ref, promo: promo, promoWhy: pc.why })
     }
 
     // the customer's phone asks how its orders are doing — by the private order id only;
@@ -249,7 +293,7 @@ function doPost(e) {
 
     // admin (/hasil): what's on sale, prices, open/closed, cut-off
     if (b.type === 'preorder-config') {
-      if (!b.pin || b.pin !== props.getProperty('CREW_PIN')) return json_({ ok: false, error: 'pin' })
+      if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
       const c = b.config || {}
       const items = {}
       Object.keys(PREORDER_ITEMS).forEach((id) => {
@@ -266,7 +310,7 @@ function doPost(e) {
     // and "code sent on WhatsApp" — the order is found by its id
     if (b.type === 'preorder-status') {
       CacheService.getScriptCache().remove('stats') // a rejected promo order frees its slot
-      if (!b.pin || b.pin !== props.getProperty('CREW_PIN')) return json_({ ok: false, error: 'pin' })
+      if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
       const sh = orderSheet_()
       const rows = orderRows_(sh)
       const i = rows.map((r) => String(r[2])).indexOf(String(b.id))
@@ -314,7 +358,7 @@ function doPost(e) {
 
     // admin (/hasil): show a screenshot without sharing the Drive file with anyone
     if (b.type === 'preorder-proof-get') {
-      if (!b.pin || b.pin !== props.getProperty('CREW_PIN')) return json_({ ok: false, error: 'pin' })
+      if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
       const r = orderRows_(orderSheet_()).filter((x) => String(x[2]) === String(b.id))[0]
       const id = r && fileId_(r[14])
       if (!id) return json_({ ok: false, error: 'none' })
@@ -325,11 +369,11 @@ function doPost(e) {
     // /config "Bersihkan data": empties the chosen tabs after copying each to a backup tab,
     // and moves the transfer screenshots to Drive's trash (recoverable for 30 days)
     if (b.type === 'wipe') {
-      if (!b.pin || b.pin !== props.getProperty('CREW_PIN')) return json_({ ok: false, error: 'pin' })
+      if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
       const what = Array.isArray(b.what) ? b.what : []
       const ss = SpreadsheetApp.getActiveSpreadsheet()
       const stamp = Utilities.formatDate(now, 'Asia/Jakarta', 'dd MMM HH.mm')
-      const tabs = { orders: () => orderSheet_(), feedback: () => sheet_('Feedback', FEEDBACK_COLS), scans: () => sheet_('Scans', SCAN_COLS) }
+      const tabs = { orders: () => orderSheet_(), booth: () => boothSheet_(), feedback: () => sheet_('Feedback', FEEDBACK_COLS), scans: () => sheet_('Scans', SCAN_COLS), security: () => sheet_('Keamanan', SECURITY_COLS) }
       const done = {}
       Object.keys(tabs).forEach((k) => {
         if (what.indexOf(k) === -1) return
@@ -353,19 +397,92 @@ function doPost(e) {
       return json_({ ok: true, done })
     }
 
-    if (b.type === 'pin') return json_({ ok: b.pin === props.getProperty('CREW_PIN') })
+    // which crew page this PIN opens: admin (everything), cashier (/cashier) or pickup (/pickup)
+    if (b.type === 'pin') return json_({ ok: allowed_(b) })
+
+    // /admin and friends are a decoy — whoever pokes at them ends up in the "Keamanan" tab
+    if (b.type === 'trap') {
+      securityLog_('Coba buka admin palsu', clip_(b.path, 60), b.ua, Number(b.tries) ? Number(b.tries) + '× coba PIN' : 'buka halaman')
+      return json_({ ok: true })
+    }
+
+    // /cashier: a walk-in sale at the booth — paid on the spot, straight into the pickup queue
+    if (b.type === 'booth-order') {
+      if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
+      const sh = boothSheet_()
+      const rows = boothRows_(sh)
+      const prev = rows.filter((r) => String(r[2]) === String(b.id))[0]
+      if (prev) return json_({ ok: true, code: String(prev[1]) })
+      const lines = []
+      ;(b.lines || []).forEach((l) => {
+        const qty = Math.floor(Number(l.qty))
+        const price = Math.round(Number(l.price))
+        if (!(qty > 0) || qty > 50 || !(price > 0) || price > 500) return
+        lines.push({ id: clip_(l.id, 40), name: clip_(l.name, 60), qty: qty, price: price, drinks: (Array.isArray(l.drinks) ? l.drinks : []).slice(0, 5).map((d) => clip_(d, 20)) })
+      })
+      if (!lines.length) return json_({ ok: false, error: 'empty' })
+      const total = lines.reduce((t, l) => t + l.qty * l.price, 0)
+      const code = 'B-' + ('00' + (rows.reduce((m, r) => Math.max(m, Number(String(r[1]).replace(/\D/g, '')) || 0), 0) + 1)).slice(-3)
+      sh.appendRow([now, code, clip_(b.id, 64), clip_(b.name, 60), lines.map((l) => l.qty + '× ' + l.name).join(', '), total * 1000, b.pay === 'qris' ? 'QRIS' : b.pay === 'bca' ? 'Transfer BCA' : 'Tunai', BOOTH_STATUS.process, JSON.stringify(lines), clip_(b.note, 200)])
+      return json_({ ok: true, code: code })
+    }
+
+    // /cashier: undo a sale typed by mistake (it leaves the pickup queue, the row stays as "batal")
+    if (b.type === 'booth-void') {
+      if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
+      const sh = boothSheet_()
+      const i = boothRows_(sh).map((r) => String(r[2])).indexOf(String(b.id))
+      if (i === -1) return json_({ ok: false, error: 'id' })
+      sh.getRange(i + 2, 8).setValue(BOOTH_STATUS.void)
+      return json_({ ok: true })
+    }
+
+    // /pickup + /cashier: everything that's paid — verified pre-orders and booth sales
+    if (b.type === 'queue') {
+      if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
+      const po = orderRows_(orderSheet_())
+        .filter((r) => ['process', 'done'].indexOf(statusOf_(r[8])) !== -1)
+        .map((r) => ({ src: 'po', id: String(r[2]), code: String(r[1]), name: String(r[3]), at: new Date(r[0]).getTime(), total: Number(r[6]) / 1000, pay: 'BCA', note: String(r[7]), done: statusOf_(r[8]) === 'done', lines: JSON.parse(String(r[9]) || '[]') }))
+      const booth = boothRows_(boothSheet_())
+        .filter((r) => String(r[7]) !== BOOTH_STATUS.void)
+        .map((r) => ({ src: 'booth', id: String(r[2]), code: String(r[1]), name: String(r[3]), at: new Date(r[0]).getTime(), total: Number(r[5]) / 1000, pay: String(r[6]), note: String(r[9]), done: String(r[7]) === BOOTH_STATUS.done, lines: JSON.parse(String(r[8]) || '[]') }))
+      return json_({ ok: true, orders: po.concat(booth) })
+    }
+
+    // /pickup: handed over (or undo) — only orders that are already paid
+    if (b.type === 'pickup') {
+      if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
+      if (b.src === 'booth') {
+        const sh = boothSheet_()
+        const rows = boothRows_(sh)
+        const i = rows.map((r) => String(r[2])).indexOf(String(b.id))
+        if (i === -1 || String(rows[i][7]) === BOOTH_STATUS.void) return json_({ ok: false, error: 'id' })
+        sh.getRange(i + 2, 8).setValue(b.done ? BOOTH_STATUS.done : BOOTH_STATUS.process)
+        sh.getRange(i + 2, 11).setValue(b.done ? now : '')
+      } else {
+        const sh = orderSheet_()
+        const rows = orderRows_(sh)
+        const i = rows.map((r) => String(r[2])).indexOf(String(b.id))
+        if (i === -1 || ['process', 'done'].indexOf(statusOf_(rows[i][8])) === -1) return json_({ ok: false, error: 'id' })
+        sh.getRange(i + 2, 9).setValue(b.done ? STATUS.done : STATUS.process)
+      }
+      return json_({ ok: true })
+    }
 
     // crew-only: every answer (incl. contacts) for the /hasil page — PIN in the body, never in a URL
     if (b.type === 'results') {
-      if (!b.pin || b.pin !== props.getProperty('CREW_PIN')) return json_({ ok: false, error: 'pin' })
+      if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
       const ss = SpreadsheetApp.getActiveSpreadsheet()
       const fb = sheet_('Feedback', FEEDBACK_COLS)
       const sc = sheet_('Scans', SCAN_COLS)
       const rows = fb.getLastRow() > 1 ? fb.getRange(2, 1, fb.getLastRow() - 1, FEEDBACK_COLS.length).getValues() : []
       const scans = sc.getLastRow() > 1 ? sc.getRange(2, 1, sc.getLastRow() - 1, 2).getValues() : []
+      const sec = sheet_('Keamanan', SECURITY_COLS)
+      const secRows = sec.getLastRow() > 1 ? sec.getRange(Math.max(2, sec.getLastRow() - 49), 1, Math.min(50, sec.getLastRow() - 1), SECURITY_COLS.length).getValues() : []
       return json_({
         ok: true,
         sheetUrl: ss.getUrl(),
+        security: secRows.reverse().map((r) => ({ at: new Date(r[0]).getTime(), what: String(r[1]), from: String(r[2]), ua: String(r[3]), detail: String(r[4]) })),
         responses: rows.map((r) => ({
           at: new Date(r[0]).getTime(), rating: Number(r[2]) || null, favorites: String(r[3]),
           like: String(r[4]), wish: String(r[5]), question: String(r[6]), idea: String(r[7]),

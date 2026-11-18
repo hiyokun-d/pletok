@@ -134,6 +134,12 @@ Everything runs on one shared clock, so changing the time moves every countdown,
 
 **Serving past 16.00?** Force **Last call** (or nudge the clock back) so the closing animation waits.
 
+### Kasir, pickup & security (one crew PIN for all)
+
+- **/cashier** — booth till: tap the menu, pick **Tunai / QRIS / BCA** (BCA shows the account from /config), see the change, then **Lunas** → a **B-001** number goes straight to pickup. Today's sales with totals per method; a wrong sale can be cancelled (tap twice) until it's picked up.
+- **/pickup** — every paid order in one queue: verified pre-orders (PLT-…) and booth sales (B-…), oldest first, refreshed every 5 s, new ones glow. Cups-to-make tally on top, type the digits or a name to find one, **Sudah diambil** (with undo).
+- **Security** — a wrong PIN is answered 3 s late, one guess at a time, and logged; **/admin**, /login, /wp-admin… are a decoy login that logs the visit and, after 3 tries, shows "Ketahuan 😏". Everything shows in /hasil → **Keamanan** and the Sheet's "Keamanan" tab.
+
 ### Debug URLs
 | URL | Shows |
 |---|---|

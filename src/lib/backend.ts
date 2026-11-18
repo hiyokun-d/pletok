@@ -27,10 +27,13 @@ const write = (q: Payload[]) => {
 }
 
 /** a plain-text POST is a "simple" request, so the browser skips the CORS preflight Apps Script can't answer */
+// anything with a PIN tells the Sheet which device sent it — a wrong PIN lands in the "Keamanan" tab
+const withUa = (p: Payload) => ('pin' in p ? { ...p, ua: navigator.userAgent } : p)
+
 async function post(p: Payload): Promise<boolean> {
   if (!BACKEND) return false
   try {
-    const r = await fetch(BACKEND, { method: 'POST', body: JSON.stringify(p), keepalive: true })
+    const r = await fetch(BACKEND, { method: 'POST', body: JSON.stringify(withUa(p)), keepalive: true })
     const j = (await r.json()) as { ok?: boolean }
     return !!j.ok
   } catch {
@@ -105,6 +108,7 @@ export const crewPin = () => {
     return null
   }
 }
+/** checks the PIN with the Sheet (one PIN for every crew page); remembers it on this device */
 export async function setCrewPin(pin: string | null): Promise<boolean> {
   if (pin === null) {
     localStorage.removeItem(PIN_KEY)
@@ -128,8 +132,17 @@ export interface Response {
   consent: boolean
   source: string
 }
+export interface SecurityEvent {
+  at: number
+  what: string
+  from: string
+  ua: string
+  detail: string
+}
 export interface Results {
   sheetUrl: string
+  /** newest first: wrong PINs and visits to the fake /admin */
+  security?: SecurityEvent[]
   orders?: Order[]
   responses: Response[]
   scans: Array<{ at: number; target: string }>
@@ -225,7 +238,7 @@ async function postJson<T>(p: Payload, tries = 3): Promise<(T & { ok: boolean; e
   if (!BACKEND) return null
   for (let i = 0; i < tries; i++) {
     try {
-      const r = await fetch(BACKEND, { method: 'POST', body: JSON.stringify(p) })
+      const r = await fetch(BACKEND, { method: 'POST', body: JSON.stringify(withUa(p)) })
       return (await r.json()) as T & { ok: boolean; error?: string }
     } catch {
       await new Promise((res) => window.setTimeout(res, 1200 * (i + 1)))
@@ -235,7 +248,7 @@ async function postJson<T>(p: Payload, tries = 3): Promise<(T & { ok: boolean; e
 }
 
 export function submitPreorder(order: { id: string; items: Array<{ id: string; qty: number }>; name: string; wa: string; note: string; hp: string }) {
-  return postJson<{ status: OrderStatus; total: number; ref: string; promo?: number }>({ type: 'preorder', ...order })
+  return postJson<{ status: OrderStatus; total: number; ref: string; promo?: number; promoWhy?: '' | 'off' | 'full' | 'used' }>({ type: 'preorder', ...order })
 }
 
 /** the customer's own orders, by their private ids — the code only comes back once verified */
@@ -268,7 +281,7 @@ export async function savePreorderConfig(pin: string, config: PreorderConfig): P
   return !!r?.ok
 }
 
-export type WipeTarget = 'orders' | 'feedback' | 'scans' | 'proofs'
+export type WipeTarget = 'orders' | 'booth' | 'feedback' | 'scans' | 'security' | 'proofs'
 /** admin: clear test data — the Sheet backs each tab up first; returns how many were removed */
 export async function wipeData(pin: string, what: WipeTarget[]) {
   const r = await postJson<{ done: Partial<Record<WipeTarget, number>> }>({ type: 'wipe', pin, what }, 1)
@@ -358,4 +371,54 @@ if (typeof window !== 'undefined' && BACKEND) {
   window.addEventListener('online', () => void flushOutbox())
   window.setInterval(() => void flushOutbox(), 15_000)
   void flushOutbox()
+}
+
+/* ---------------------------------------------------------------- booth: /cashier and /pickup */
+
+/** a line as the booth sells it — `drinks` are the cups to make (a bundle has 2–3) */
+export interface BoothLine {
+  id: string
+  name: string
+  qty: number
+  price: number
+  drinks: string[]
+}
+/** one paid order in the pickup queue: a verified pre-order ('po') or a walk-in sale ('booth') */
+export interface QueueOrder {
+  src: 'po' | 'booth'
+  id: string
+  code: string
+  name: string
+  at: number
+  total: number
+  pay: string
+  note: string
+  done: boolean
+  lines: Array<{ id: string; name: string; qty: number; price: number; drinks?: string[] }>
+}
+
+export async function fetchQueue(pin: string): Promise<QueueOrder[] | 'pin' | null> {
+  const r = await postJson<{ orders: QueueOrder[] }>({ type: 'queue', pin }, 1)
+  return r?.ok ? r.orders : r?.error === 'pin' ? 'pin' : null
+}
+
+export type BoothPay = 'tunai' | 'qris' | 'bca'
+/** a walk-in sale; the id makes a retry safe (same sale, same code) */
+export async function sendBoothOrder(pin: string, order: { id: string; lines: BoothLine[]; pay: BoothPay; name: string; note: string }) {
+  const r = await postJson<{ code: string }>({ type: 'booth-order', pin, ...order })
+  return r?.ok ? r.code : r?.error === 'pin' ? ('pin' as const) : null
+}
+
+export async function voidBoothOrder(pin: string, id: string) {
+  return !!(await postJson({ type: 'booth-void', pin, id }, 2))?.ok
+}
+
+export async function markPickedUp(pin: string, src: QueueOrder['src'], id: string, done: boolean) {
+  return !!(await postJson({ type: 'pickup', pin, src, id, done }, 2))?.ok
+}
+
+/** the fake /admin page reports itself — fire and forget */
+export function reportTrap(path: string, tries: number) {
+  if (!BACKEND) return
+  void fetch(BACKEND, { method: 'POST', body: JSON.stringify({ type: 'trap', path, tries, ua: navigator.userAgent }), keepalive: true }).catch(() => {})
 }

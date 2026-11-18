@@ -27,7 +27,7 @@ export interface MyOrder {
   /** first-N promo discount (thousands) the Sheet gave, already off `total` */
   promo?: number
   /** the screen promised a promo slot but they were all gone by the time the order landed */
-  promoMissed?: boolean
+  promoMissed?: boolean | 'used'
 }
 
 const KEY = 'pletok:orders'
@@ -90,7 +90,7 @@ export function useMyOrders() {
       const next = os.flatMap((o) => {
         const u = r.find((x) => x.id === o.id)
         if (!u) return ids.includes(o.id) ? [] : [o]
-        return [{ ...o, status: u.status, code: u.code || o.code, ref: u.ref || o.ref, proof: u.proof || o.proof, promo: u.promo ?? o.promo }]
+        return [{ ...o, status: u.status, total: u.total || o.total, code: u.code || o.code, ref: u.ref || o.ref, proof: u.proof || o.proof, promo: u.promo ?? o.promo }]
       })
       store(next)
       return next
@@ -121,7 +121,7 @@ export const waLocal = (raw: string) => {
   return d.slice(0, 13)
 }
 export const waValid = (local: string) => /^8\d{8,12}$/.test(local)
-const waGroups = (local: string) => [local.slice(0, 3), local.slice(3, 7), local.slice(7)].filter(Boolean).join('-')
+export const waGroups = (local: string) => [local.slice(0, 3), local.slice(3, 7), local.slice(7)].filter(Boolean).join('-')
 
 /** a WhatsApp field with a fixed +62 in front: typing 0…, 62… or +62… all land in the same place */
 export function WaInput({ value, onChange, placeholder = '812-3456-7890', className = '' }: { value: string; onChange: (local: string) => void; placeholder?: string; className?: string }) {
@@ -389,6 +389,13 @@ export function PromoBanner({ promo, left, href, loud = false, className = '' }:
   const used = promo.slots - left
   const off = promo.mode === 'pct' ? `${promo.value}%` : rupiah(promo.value)
   const gone = left <= 0
+  // someone just grabbed a slot (or the last one went) while this screen was open: say so
+  const [taken, setTaken] = useState<{ n: number; at: number }>()
+  const prevLeft = useRef(left)
+  useEffect(() => {
+    if (left < prevLeft.current) setTaken({ n: prevLeft.current - left, at: Date.now() })
+    prevLeft.current = left
+  }, [left])
   // on the landing page / link page it's a way in: tap → /preorder
   const Box = href ? motion.a : motion.div
   return (
@@ -408,6 +415,25 @@ export function PromoBanner({ promo, left, href, loud = false, className = '' }:
           transition={{ duration: 1.1, repeat: Infinity, repeatDelay: 2.4, ease: 'easeInOut' }}
         />
       )}
+      <AnimatePresence>
+        {taken && !gone && (
+          <motion.span
+            key={taken.at}
+            aria-hidden
+            className="pointer-events-none absolute right-4 top-3 rounded-full bg-[#e8b53a] px-2.5 py-0.5 font-display text-sm font-bold text-brown shadow"
+            initial={{ opacity: 0, y: 12, scale: 0.6 }}
+            animate={{ opacity: [0, 1, 1, 0], y: [12, 0, -6, -26], scale: [0.6, 1.15, 1, 0.9] }}
+            transition={{ duration: 2.2, times: [0, 0.15, 0.7, 1] }}
+            onAnimationComplete={() => setTaken(undefined)}
+          >
+            −{taken.n} slot!
+          </motion.span>
+        )}
+      </AnimatePresence>
+      {taken && !gone && (
+        // a flash across the card as the slot goes
+        <motion.span key={'f' + taken.at} aria-hidden className="pointer-events-none absolute inset-0 rounded-3xl bg-[#e8b53a]" initial={{ opacity: 0.45 }} animate={{ opacity: 0 }} transition={{ duration: 0.9 }} />
+      )}
       <div className="relative flex items-center gap-3">
         <motion.span className="shrink-0" {...(loud && !gone ? { animate: { rotate: [0, -14, 12, -8, 0] }, transition: { duration: 0.9, repeat: Infinity, repeatDelay: 2.6 } } : {})}>
           <Gift className={`size-7 ${gone ? 'text-brown/40' : ''}`} />
@@ -422,17 +448,39 @@ export function PromoBanner({ promo, left, href, loud = false, className = '' }:
                   <span className="absolute inline-flex size-full animate-ping rounded-full bg-cream opacity-70" />
                   <span className="relative inline-flex size-2 rounded-full bg-cream" />
                 </span>
-                Sisa <Morph text={String(left)} className="font-bold not-italic" /> slot{href ? ' · tap buat pesan' : ' · 1× per nomor WA · dihitung waktu pesanan masuk'}
+                Sisa{' '}
+                <motion.span key={left} className="inline-block" initial={taken ? { scale: 1.8 } : false} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 400, damping: 12 }}>
+                  <Morph text={String(left)} className="font-bold not-italic" />
+                </motion.span>{' '}
+                slot{href ? ' · tap buat pesan' : ' · 1× per nomor WA · dihitung waktu pesanan masuk'}
               </>
             )}
           </p>
         </div>
         {href && !gone && <ArrowRight className="size-5 shrink-0" />}
+        {gone && (
+          <motion.span
+            aria-hidden
+            className="shrink-0 rotate-[-12deg] rounded-lg border-2 border-terracotta px-2 py-0.5 font-display text-sm font-bold uppercase tracking-wider text-terracotta"
+            initial={{ scale: 2.6, opacity: 0, rotate: -30 }}
+            animate={{ scale: 1, opacity: 1, rotate: -12 }}
+            transition={{ type: 'spring', stiffness: 500, damping: 18, delay: 0.15 }}
+          >
+            Habis
+          </motion.span>
+        )}
       </div>
       {!gone && promo.slots <= 30 && (
         <div className="mt-3 flex flex-wrap gap-1.5" aria-hidden>
           {Array.from({ length: promo.slots }, (_, i) => (
-            <span key={i} className={`h-2 min-w-2.5 flex-1 rounded-full transition-colors duration-500 ${i < used ? 'bg-cream/25' : 'bg-cream'}`} style={{ transitionDelay: `${i * 30}ms` }} />
+            <motion.span
+              key={i}
+              className={`h-2 min-w-2.5 flex-1 rounded-full transition-colors duration-500 ${i < used ? 'bg-cream/25' : 'bg-cream'}`}
+              style={{ transitionDelay: `${i * 30}ms` }}
+              // the dot that just went out pops
+              animate={taken && i >= used - taken.n && i < used ? { scaleY: [1, 2.6, 1], scaleX: [1, 1.15, 1] } : { scaleY: 1, scaleX: 1 }}
+              transition={{ duration: 0.6 }}
+            />
           ))}
         </div>
       )}
@@ -494,10 +542,17 @@ export function OrderTracker({ order, config, onBack, onProof, checkedAt }: { or
     if (was === 'hold' && verified) setBurst(Date.now())
     setWas(order.status)
   }, [order.status]) // eslint-disable-line react-hooks/exhaustive-deps
+  // a promo slot they just landed gets its own little party (only right after ordering, not on every visit)
+  const [promoBurst, setPromoBurst] = useState<number>()
+  const fresh = !!order.promo && order.status === 'hold' && Date.now() - order.at < 60_000
+  useEffect(() => {
+    if (fresh) setPromoBurst(Date.now() + 500)
+  }, [order.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="flex flex-col items-center text-center">
       <ParticleField preset="burst" overrides={{ shape: 'leaf', count: 80 }} points={[[window.innerWidth / 2, window.innerHeight * 0.3]]} burstKey={burst} />
+      <ParticleField preset="burst" overrides={{ shape: 'sparkle', count: 60, colors: ['#e8b53a', '#8faa4f', '#f5ebdd', '#5e7b3a'] }} points={[[window.innerWidth / 2, 190]]} burstKey={promoBurst} />
       <button type="button" onClick={onBack} className="mb-4 inline-flex items-center gap-1.5 self-start font-display font-semibold text-brown-soft">
         <ArrowLeft className="size-4" /> Kembali
       </button>
@@ -535,12 +590,20 @@ export function OrderTracker({ order, config, onBack, onProof, checkedAt }: { or
             <h1 className="mt-4 font-display text-3xl font-bold">Tinggal bayar</h1>
             <p className="mt-1 max-w-sm font-display text-brown-soft">Transfer persis sejumlah ini, lalu tunggu sebentar — kode ambilmu muncul di sini setelah kami cek.</p>
             {!!order.promo && (
-              <p className="mt-3 inline-flex items-center gap-2 rounded-full bg-leaf px-4 py-1.5 font-display text-sm font-semibold text-cream">
-                <Gift className="size-4" /> Dapat promo pemesan pertama −{rupiah(order.promo)}
-              </p>
+              <motion.p
+                className="mt-3 inline-flex items-center gap-2 rounded-full bg-leaf px-4 py-1.5 font-display text-sm font-semibold text-cream shadow-[0_4px_0_#3f5426]"
+                initial={fresh ? { scale: 0.3, opacity: 0, rotate: -6 } : false}
+                animate={{ scale: [null, 1.12, 1], opacity: 1, rotate: 0 }}
+                transition={{ delay: 0.45, duration: 0.6, ease: 'backOut' }}
+              >
+                <motion.span animate={fresh ? { rotate: [0, -18, 14, -10, 0], scale: [1, 1.3, 1] } : undefined} transition={{ delay: 0.9, duration: 0.8 }}>
+                  <Gift className="size-4" />
+                </motion.span>
+                Selamat! Kamu dapat promo pemesan pertama −{rupiah(order.promo)}
+              </motion.p>
             )}
             {order.promoMissed && !order.promo && (
-              <p className="mt-3 max-w-sm rounded-2xl bg-brown/5 px-4 py-2 font-display text-sm text-brown-soft">Yah, slot promonya keburu habis duluan 🥲 Totalnya pakai harga pre-order biasa (tetap lebih murah dari booth).</p>
+              <p className="mt-3 max-w-sm rounded-2xl bg-brown/5 px-4 py-2 font-display text-sm text-brown-soft">{order.promoMissed === 'used' ? 'Promo pemesan pertama cuma 1× per nomor WA, dan nomor ini sudah dapat 🙏 Totalnya pakai harga pre-order biasa (tetap lebih murah dari booth).' : 'Yah, slot promonya keburu habis duluan 🥲 Totalnya pakai harga pre-order biasa (tetap lebih murah dari booth).'}</p>
             )}
 
             <div className="mt-5 w-full max-w-sm rounded-3xl bg-brown p-5 text-cream">

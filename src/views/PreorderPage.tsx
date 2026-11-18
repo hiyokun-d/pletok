@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useAnimate } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 import {
   CalendarClock,
@@ -18,6 +18,7 @@ import { usePreorder } from "../hooks/usePreorder";
 import { BackButton } from "../components/BackButton";
 import { PaperPlane } from "../components/PaperPlane";
 import { Sprout } from "../components/Sprout";
+import { ParticleField } from "../components/ParticleField";
 import { useMenu } from "../hooks/useMenu";
 import {
   AdminContact,
@@ -25,6 +26,7 @@ import {
   NoRefund,
   PromoBanner,
   WaInput,
+  waGroups,
   waValid,
   MyOrdersList,
   OrderTracker,
@@ -160,7 +162,7 @@ export function PreorderPage() {
         code: "",
         ref: r.ref,
         promo: r.promo ?? 0,
-        promoMissed: promoEst > 0 && !r.promo,
+        promoMissed: promoEst > 0 && !r.promo ? (r.promoWhy === "used" ? "used" : true) : false,
         lines: lines.map((i) => ({
           id: i.id,
           name: i.name,
@@ -189,7 +191,12 @@ export function PreorderPage() {
 
   return (
     <main className="paper min-h-dvh px-5 pb-10 pt-6 text-brown">
-      <div className="mx-auto max-w-2xl">
+      {/* jamu leaves drifting behind everything — a near layer of big ones and a far layer of small, faint ones */}
+      <div className="pointer-events-none fixed inset-0 z-0">
+        <ParticleField preset="leaf" overrides={{ count: 70, size: [7, 14], opacity: 0.45, travel: [18, 38] }} />
+        <ParticleField preset="leaf" overrides={{ count: 34, size: [16, 30], travel: [34, 70], sway: 55 }} />
+      </div>
+      <div className="relative z-10 mx-auto max-w-2xl">
         <AnimatePresence mode="wait">
           {flight ? (
             <motion.section
@@ -315,69 +322,21 @@ export function PreorderPage() {
               <FindOrder onFound={mine.merge} onOpen={setTrackId} notice={linkMiss} />
 
               <div className="flex flex-col gap-3">
-                {items.map((i) => {
-                  const n = qty[i.id] ?? 0;
-                  return (
-                    <div
-                      key={i.id}
-                      className={`flex items-center gap-3 rounded-3xl border-2 p-3 transition-colors ${n ? "border-terracotta/60 bg-cream" : "border-brown/10 bg-cream/70"}`}
-                    >
-                      <div className="flex h-20 w-24 shrink-0 items-end justify-center">
-                        {i.images.map((src, k) => (
-                          <img
-                            key={k}
-                            src={src}
-                            alt=""
-                            className="h-full w-auto min-w-0 object-contain"
-                            style={{
-                              marginInline: i.images.length > 1 ? -10 : 0,
-                            }}
-                          />
-                        ))}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="font-display text-lg font-bold leading-tight">
-                          {i.name}
-                        </p>
-                        <p className="truncate font-cond text-sm italic text-brown-soft">
-                          {i.detail}
-                        </p>
-                        <p className="mt-0.5 flex flex-wrap items-baseline gap-x-2 font-display font-semibold text-terracotta">
-                          {rupiah(i.price)}
-                          {i.normal > i.price && (
-                            <>
-                              <s className="text-sm font-normal text-brown/45">
-                                {rupiah(i.normal)}
-                              </s>
-                              <span className="rounded-full bg-leaf px-2 py-0.5 font-cond text-xs italic text-cream">
-                                hemat {rupiah(i.normal - i.price)}
-                              </span>
-                            </>
-                          )}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1.5">
-                        <Step
-                          label={`Kurangi ${i.name}`}
-                          onClick={() => bump(i.id, -1)}
-                          disabled={!n}
-                        >
-                          <Minus className="size-4" />
-                        </Step>
-                        <span className="w-6 text-center font-display text-lg font-bold tabular-nums">
-                          {n}
-                        </span>
-                        <Step
-                          label={`Tambah ${i.name}`}
-                          onClick={() => bump(i.id, 1)}
-                          solid
-                        >
-                          <Plus className="size-4" />
-                        </Step>
-                      </div>
-                    </div>
-                  );
-                })}
+                {items.map((i, k) => (
+                  <ItemCard
+                    key={i.id}
+                    item={i}
+                    n={qty[i.id] ?? 0}
+                    index={k}
+                    // while slots are left, a % promo shows on every card as the price they'd pay
+                    promoPrice={
+                      promoLeft > 0 && config.promo?.mode === "pct"
+                        ? i.price - promoOff(config.promo, i.price)
+                        : 0
+                    }
+                    onBump={(d) => bump(i.id, d)}
+                  />
+                ))}
               </div>
 
               <section className="flex flex-col gap-2">
@@ -408,6 +367,71 @@ export function PreorderPage() {
                 <NoRefund className="mt-1" />
                 <AdminContact className="mt-2" />
               </section>
+
+              {/* the whole order in one place, right above the button — no scrolling back up to check */}
+              <AnimatePresence initial={false}>
+                {lines.length > 0 && (
+                  <motion.section
+                    key="summary"
+                    className="overflow-hidden rounded-3xl border-2 border-brown/15 bg-cream p-4 font-display"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                  >
+                    <p className="font-cond text-sm font-semibold uppercase italic tracking-[0.25em] text-terracotta">
+                      Ringkasan pesanan
+                    </p>
+                    <ul className="mt-2 flex flex-col gap-1">
+                      <AnimatePresence initial={false}>
+                        {lines.map((i) => (
+                          <motion.li
+                            key={i.id}
+                            layout
+                            className="flex items-baseline justify-between gap-3"
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 10 }}
+                          >
+                            <span className="min-w-0">
+                              <span className="font-bold tabular-nums">{qty[i.id]}×</span> {i.name}
+                            </span>
+                            <span className="shrink-0 tabular-nums">{rupiah(i.price * qty[i.id])}</span>
+                          </motion.li>
+                        ))}
+                      </AnimatePresence>
+                    </ul>
+                    <div className="mt-2 flex flex-col gap-1 border-t-2 border-dashed border-brown/15 pt-2 text-sm">
+                      {saved > 0 && (
+                        <p className="flex justify-between gap-3 text-leaf">
+                          <span>Hemat pre-order</span>
+                          <span className="tabular-nums">sudah termasuk −{rupiah(saved)}</span>
+                        </p>
+                      )}
+                      {promoEst > 0 && (
+                        <p className="flex justify-between gap-3 text-leaf">
+                          <span>Promo pemesan pertama*</span>
+                          <span className="tabular-nums">−{rupiah(promoEst)}</span>
+                        </p>
+                      )}
+                      <p className="flex justify-between gap-3 text-base font-bold">
+                        <span>Total</span>
+                        <span className="tabular-nums">{rupiah(total - promoEst)}</span>
+                      </p>
+                    </div>
+                    <p className="mt-2 text-sm text-brown-soft">
+                      a.n. <span className="font-semibold text-brown">{name.trim() || "—"}</span>
+                      {" · "}
+                      {waOk ? `+62 ${waGroups(wa)}` : <span className="text-terracotta">nomor WA belum lengkap</span>}
+                    </p>
+                    {note.trim() && <p className="mt-1 line-clamp-2 font-cond text-sm italic text-brown/60">“{note.trim()}”</p>}
+                    {promoEst > 0 && (
+                      <p className="mt-1 font-cond text-xs italic text-brown/50">
+                        *Promo dipastikan waktu pesanan masuk — 1× per nomor WA.
+                      </p>
+                    )}
+                  </motion.section>
+                )}
+              </AnimatePresence>
 
               <input
                 tabIndex={-1}
@@ -457,7 +481,14 @@ export function PreorderPage() {
                     {promoEst > 0 && (
                       <s className="text-xs font-normal opacity-70">{rupiah(total)}</s>
                     )}
-                    {rupiah(total - promoEst)}
+                    <motion.span
+                      key={total}
+                      initial={total ? { scale: 1.25, y: -3 } : false}
+                      animate={{ scale: 1, y: 0 }}
+                      transition={{ type: "spring", stiffness: 500, damping: 15 }}
+                    >
+                      {rupiah(total - promoEst)}
+                    </motion.span>
                   </span>
                 </motion.button>
               </div>
@@ -466,6 +497,163 @@ export function PreorderPage() {
         </AnimatePresence>
       </div>
     </main>
+  );
+}
+
+type CardItem = (typeof PREORDER_ITEMS)[number] & { normal: number; price: number };
+
+/**
+ * One menu card. Adding makes the cups hop and a "+1" float up; taking one off gives
+ * a little head-shake. The count rolls in the direction it moved.
+ */
+function ItemCard({
+  item: i,
+  n,
+  index,
+  promoPrice,
+  onBump,
+}: {
+  item: CardItem;
+  n: number;
+  index: number;
+  /** price after the first-N promo, 0 when there's none to show */
+  promoPrice: number;
+  onBump: (d: number) => void;
+}) {
+  const [card, animateCard] = useAnimate<HTMLDivElement>();
+  const [cups, animateCups] = useAnimate<HTMLDivElement>();
+  const [dir, setDir] = useState(1);
+  const [pops, setPops] = useState<Array<{ at: number; d: number }>>([]);
+  const press = (d: number) => {
+    if (d < 0 && !n) return;
+    if (d > 0 && n >= 20) {
+      animateCard(card.current, { x: [0, 5, -5, 0] }, { duration: 0.3 });
+      return;
+    }
+    setDir(d);
+    onBump(d);
+    const at = Date.now() + Math.random();
+    setPops((ps) => [...ps.slice(-3), { at, d }]);
+    if (d > 0) {
+      animateCups(cups.current, { y: [0, -14, 0], rotate: [0, -6, 4, 0], scaleY: [1, 1.08, 0.94, 1] }, { duration: 0.5, ease: "easeOut" });
+      animateCard(card.current, { scale: [1, 1.025, 1] }, { duration: 0.35 });
+    } else {
+      animateCups(cups.current, { y: [0, 4, 0], scaleY: [1, 0.9, 1] }, { duration: 0.3 });
+      animateCard(card.current, { x: [0, -6, 5, -3, 0] }, { duration: 0.35 });
+    }
+  };
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.05 * index, type: "spring", stiffness: 260, damping: 24 }}
+    >
+      <div
+        ref={card}
+        className={`relative flex items-center gap-3 rounded-3xl border-2 p-3 transition-[border-color,background-color,box-shadow] duration-300 ${n ? "border-terracotta/60 bg-cream shadow-[0_4px_0_rgba(168,87,42,0.18)]" : "border-brown/10 bg-cream/70"}`}
+      >
+        <div ref={cups} className="relative flex h-20 w-24 shrink-0 origin-bottom items-end justify-center">
+          {i.images.map((src, k) => (
+            <img
+              key={k}
+              src={src}
+              alt=""
+              className="h-full w-auto min-w-0 object-contain"
+              style={{ marginInline: i.images.length > 1 ? -10 : 0 }}
+            />
+          ))}
+          <AnimatePresence>
+            {n > 0 && (
+              // how many are in the cart, on the cup itself
+              <motion.span
+                key="badge"
+                className="absolute -right-1 -top-1 grid size-6 place-items-center rounded-full bg-terracotta font-display text-xs font-bold text-cream shadow"
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                exit={{ scale: 0 }}
+                transition={{ type: "spring", stiffness: 600, damping: 18 }}
+              >
+                {n}
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="font-display text-lg font-bold leading-tight">{i.name}</p>
+          <p className="truncate font-cond text-sm italic text-brown-soft">{i.detail}</p>
+          <p className="mt-0.5 flex flex-wrap items-baseline gap-x-2 font-display font-semibold text-terracotta">
+            {promoPrice > 0 && promoPrice < i.price ? (
+              <>
+                <s className="text-sm font-normal text-brown/45 decoration-dashed">{rupiah(i.price)}</s>
+                <motion.span
+                  className="inline-flex items-baseline gap-1 text-leaf"
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                >
+                  {rupiah(promoPrice)}
+                  <span className="rounded-full bg-[#e8b53a] px-1.5 py-0.5 font-cond text-[0.65rem] font-bold uppercase not-italic text-brown">
+                    promo
+                  </span>
+                </motion.span>
+              </>
+            ) : (
+              rupiah(i.price)
+            )}
+            {i.normal > i.price && !promoPrice && (
+              <>
+                <s className="text-sm font-normal text-brown/45">{rupiah(i.normal)}</s>
+                <span className="rounded-full bg-leaf px-2 py-0.5 font-cond text-xs italic text-cream">
+                  hemat {rupiah(i.normal - i.price)}
+                </span>
+              </>
+            )}
+          </p>
+        </div>
+        <div className="relative flex shrink-0 items-center gap-1.5">
+          <Step label={`Kurangi ${i.name}`} onClick={() => press(-1)} disabled={!n}>
+            <Minus className="size-4" />
+          </Step>
+          <span className="relative grid h-7 w-6 place-items-center overflow-hidden font-display text-lg font-bold tabular-nums">
+            <AnimatePresence initial={false} custom={dir} mode="popLayout">
+              <motion.span
+                key={n}
+                custom={dir}
+                variants={{
+                  in: (d: number) => ({ y: d > 0 ? 18 : -18, opacity: 0 }),
+                  on: { y: 0, opacity: 1 },
+                  out: (d: number) => ({ y: d > 0 ? -18 : 18, opacity: 0 }),
+                }}
+                initial="in"
+                animate="on"
+                exit="out"
+                transition={{ type: "spring", stiffness: 500, damping: 30 }}
+              >
+                {n}
+              </motion.span>
+            </AnimatePresence>
+          </span>
+          <Step label={`Tambah ${i.name}`} onClick={() => press(1)} solid>
+            <Plus className="size-4" />
+          </Step>
+          {/* +1 / −1 floating off the counter */}
+          <AnimatePresence>
+            {pops.map((p) => (
+              <motion.span
+                key={p.at}
+                aria-hidden
+                className={`pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 font-display text-sm font-bold ${p.d > 0 ? "text-leaf" : "text-terracotta"}`}
+                initial={{ opacity: 0, y: 0, scale: 0.6 }}
+                animate={{ opacity: [0, 1, 0], y: -28, scale: 1.1 }}
+                transition={{ duration: 0.7, ease: "easeOut" }}
+                onAnimationComplete={() => setPops((ps) => ps.filter((x) => x.at !== p.at))}
+              >
+                {p.d > 0 ? "+1" : "−1"}
+              </motion.span>
+            ))}
+          </AnimatePresence>
+        </div>
+      </div>
+    </motion.div>
   );
 }
 

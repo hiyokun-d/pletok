@@ -9,6 +9,9 @@ import { FeedbackPage } from './views/FeedbackPage'
 import { HasilPage } from './views/HasilPage'
 import { PreorderPage } from './views/PreorderPage'
 import { ConfigPage } from './views/ConfigPage'
+import { CashierPage } from './views/CashierPage'
+import { PickupPage } from './views/PickupPage'
+import { TRAP_PATH, TrapPage } from './views/TrapPage'
 import { OfflinePill } from './components/OfflinePill'
 import { ErrorBoundary, ErrorPage, type ErrorKind } from './views/ErrorPage'
 import { beforeSend, installClickTracking, trackSource } from './lib/analytics'
@@ -28,11 +31,16 @@ const PAGES: Record<string, () => ReactNode> = {
   '/hasil': () => <HasilPage />,
   '/preorder': () => <PreorderPage />,
   '/config': () => <ConfigPage />,
+  '/cashier': () => <CashierPage />,
+  '/pickup': () => <PickupPage />,
 }
 // dev only: /_error/500 (or 503, offline) previews the other error pages
 const preview = import.meta.env.DEV ? path.match(/^\/_error\/(404|500|503|offline)$/)?.[1] : undefined
 const page = hop ? (
   <GoHop to={hop} />
+) : TRAP_PATH.test(path) ? (
+  // /admin & co: a decoy that logs who's poking around (the real crew pages need the PIN on the server)
+  <TrapPage />
 ) : preview ? (
   <ErrorPage kind={(preview === 'offline' ? 'offline' : Number(preview)) as ErrorKind} />
 ) : (

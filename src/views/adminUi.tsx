@@ -1,10 +1,10 @@
 import { motion } from 'motion/react'
 import { useEffect, useState, type ReactNode } from 'react'
-import { BarChart3, Loader2, Lock, Settings2, type LucideIcon } from 'lucide-react'
+import { BarChart3, HandPlatter, Loader2, Lock, Settings2, ShoppingBasket, type LucideIcon } from 'lucide-react'
 import { setCrewPin } from '../lib/backend'
 import { spring } from '../lib/motion'
 
-/* Shared pieces of the two crew pages: /hasil (results) and /config (settings). Same PIN for both. */
+/* Shared pieces of the crew pages: /hasil (results), /config (settings), /cashier and /pickup. One PIN for all. */
 
 /** "saved here, not in the Sheet yet" — every admin control turns this colour until the Sheet agrees */
 export const WAIT = '#e8b53a'
@@ -28,14 +28,17 @@ export function useCrewPage(title: string) {
   }, [title])
 }
 
-/** big switch between the two crew pages — the admins know /hasil, so /config is one tap away */
-export function CrewNav({ at }: { at: 'hasil' | 'config' }) {
-  const tabs: Array<{ id: 'hasil' | 'config'; href: string; label: string; Icon: LucideIcon }> = [
+export type CrewPage = 'hasil' | 'config' | 'cashier' | 'pickup'
+/** big switch between the crew pages — any crew phone is one tap from the others */
+export function CrewNav({ at }: { at: CrewPage }) {
+  const tabs: Array<{ id: CrewPage; href: string; label: string; Icon: LucideIcon }> = [
+    { id: 'cashier', href: '/cashier', label: 'Kasir', Icon: ShoppingBasket },
+    { id: 'pickup', href: '/pickup', label: 'Pickup', Icon: HandPlatter },
     { id: 'hasil', href: '/hasil', label: 'Hasil & pre-order', Icon: BarChart3 },
-    { id: 'config', href: '/config', label: 'Config: menu, harga, feedback', Icon: Settings2 },
+    { id: 'config', href: '/config', label: 'Config', Icon: Settings2 },
   ]
   return (
-    <nav className="mb-6 grid grid-cols-2 gap-1 rounded-2xl bg-brown/10 p-1">
+    <nav className="mb-6 grid grid-cols-2 gap-1 rounded-2xl bg-brown/10 p-1 sm:grid-cols-4">
       {tabs.map(({ id, href, label, Icon }) => (
         <a key={id} href={href + window.location.search} aria-current={at === id ? 'page' : undefined} className="relative flex items-center justify-center gap-2 rounded-xl px-3 py-3 text-center font-display text-sm font-semibold sm:text-base">
           {at === id && <motion.span layoutId="crew-nav" className="absolute inset-0 rounded-xl bg-brown" transition={spring.snappy} />}

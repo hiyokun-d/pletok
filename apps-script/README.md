@@ -34,6 +34,8 @@ Changed `Code.gs` later? Go to **Deploy → Manage deployments → ✏️ → Ve
 |---|---|---|
 | **Feedback** | one person | time, ID, rating 1–5, favourite drinks (can be several, e.g. "Original, Yakult"), **Like, Wishes, Questions, Ideas**, name, contact, OK to contact, source, device |
 | **Scans** | one QR scan | time, target (`link` = booth QR), device |
+| **Kasir** | one booth sale (/cashier) | time, code (B-001…), ID, name, order, total (Rp), paid via (Tunai/QRIS/Transfer BCA), status (`diproses`/`selesai`/`batal`), detail JSON, note, picked-up time |
+| **Keamanan** | one wrong PIN or decoy visit | time, what, where (endpoint or path), device, detail (PIN length / tries — never the PIN itself) |
 | **Preorder** | one order | time, code (PLT-001…), ID, **name**, WhatsApp, order, total (Rp), note, status (`baru`/`selesai`), detail JSON |
 
 ## Exporting

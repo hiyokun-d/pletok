@@ -621,15 +621,17 @@ function PromoRow({ promo, used, dirty, loaded, onChange }: { promo: Promo; used
 
 const WIPE: Array<{ id: WipeTarget; label: string; hint: string }> = [
   { id: 'orders', label: 'Pre-order', hint: 'semua pesanan + kode ambil mulai lagi dari 001' },
+  { id: 'booth', label: 'Penjualan kasir', hint: 'semua transaksi /cashier + nomor B- mulai lagi dari 001' },
   { id: 'feedback', label: 'Feedback', hint: 'semua jawaban form' },
   { id: 'scans', label: 'Scan & klik', hint: 'hitungan scan QR / link' },
+  { id: 'security', label: 'Log keamanan', hint: 'PIN salah & kunjungan /admin palsu' },
   { id: 'proofs', label: 'Bukti transfer', hint: 'screenshot di Drive → Sampah (30 hari bisa dipulihkan)' },
 ]
 const CONFIRM = 'HAPUS'
 
 /** before launch: wipe the test rows. Menu, prices and pre-order settings are never touched. */
 function DataReset({ wipe }: { wipe: (what: WipeTarget[]) => Promise<Partial<Record<WipeTarget, number>> | null> }) {
-  const [pick, setPick] = useState<WipeTarget[]>(['orders', 'feedback', 'scans', 'proofs'])
+  const [pick, setPick] = useState<WipeTarget[]>(['orders', 'booth', 'feedback', 'scans', 'security', 'proofs'])
   const [typed, setTyped] = useState('')
   const [state, setState] = useState<'idle' | 'busy' | 'error'>('idle')
   const [done, setDone] = useState<Partial<Record<WipeTarget, number>>>()

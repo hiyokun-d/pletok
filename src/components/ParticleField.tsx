@@ -262,6 +262,9 @@ function ParticleFieldInner({
       vertex,
       fragment,
       transparent: true,
+      // the vertex shader flips y (screen px → clip space), which reverses the quad's winding —
+      // with OGL's default back-face culling every particle was culled away
+      cullFace: false,
       depthTest: false,
       depthWrite: false,
       uniforms: {
@@ -281,9 +284,10 @@ function ParticleFieldInner({
         uLife: { value: [1, 2] },
         uSpeed: { value: 1 },
         uOpacity: { value: 1 },
-        uColors: { value: new Float32Array(MAX_COLORS * 3) },
+        // plain arrays: OGL only recognises Array (not Float32Array) for array uniforms like uColors[0]
+        uColors: { value: new Array(MAX_COLORS * 3).fill(0) },
         uColorCount: { value: 1 },
-        uPoints: { value: new Float32Array(MAX_POINTS * 2) },
+        uPoints: { value: new Array(MAX_POINTS * 2).fill(0) },
         uPointCount: { value: 1 },
       },
     })
@@ -362,7 +366,7 @@ function ParticleFieldInner({
     u.uOpacity.value = c.opacity
     const colors = new Float32Array(MAX_COLORS * 3)
     c.colors.slice(0, MAX_COLORS).forEach((hex, i) => colors.set(hexToRgb(hex), i * 3))
-    u.uColors.value = colors
+    u.uColors.value = Array.from(colors)
     u.uColorCount.value = Math.min(MAX_COLORS, c.colors.length)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cfgKey, reduced])
@@ -375,7 +379,7 @@ function ParticleFieldInner({
     const pts = new Float32Array(MAX_POINTS * 2)
     const list = points?.length ? points : [[0, 0] as [number, number]]
     list.slice(0, MAX_POINTS).forEach(([x, y], i) => pts.set([x, y], i * 2))
-    program.uniforms.uPoints.value = pts
+    program.uniforms.uPoints.value = Array.from(pts)
     program.uniforms.uPointCount.value = Math.min(MAX_POINTS, list.length)
     program.uniforms.uBurstT.value = clockRef.current
     const done = window.setTimeout(() => onDoneRef.current?.(), configRef.current!.cfg.life[1] * 1000)
