@@ -233,11 +233,13 @@ export function CashierPage() {
                                   <button
                                     key={d.id}
                                     type="button"
+                                    disabled={d.soldOut && !now}
                                     onClick={() => setCup(i, picking.slot, d.id)}
-                                    className={`flex min-h-14 flex-col items-center justify-center rounded-xl px-1 py-1.5 text-center text-xs font-semibold leading-tight ${now ? 'bg-brown text-cream' : 'bg-cream'}`}
+                                    className={`flex min-h-14 flex-col items-center justify-center rounded-xl px-1 py-1.5 text-center text-xs font-semibold leading-tight ${now ? 'bg-brown text-cream' : d.soldOut ? 'cursor-not-allowed bg-brown/5 text-brown-soft' : 'bg-cream'}`}
                                   >
-                                    <img src={d.image} alt="" className="h-8 w-auto" />
+                                    <img src={d.image} alt="" className={`h-8 w-auto ${d.soldOut && !now ? 'opacity-35 grayscale' : ''}`} />
                                     {d.short}
+                                    {d.soldOut && !now && <span className="font-cond text-[0.7rem] font-bold uppercase text-terracotta">habis</span>}
                                   </button>
                                 )
                               })}
@@ -505,15 +507,35 @@ function SellTile({ item: i, n, index, onAdd }: { item: SellItem; n: number; ind
       initial={{ opacity: 0, y: 14 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.04 }}
-      className={`relative flex flex-col items-center rounded-3xl border-2 p-3 text-center transition-colors disabled:opacity-40 ${n ? 'border-terracotta/60 bg-cream shadow-[0_4px_0_rgba(168,87,42,0.18)]' : 'border-brown/10 bg-cream/70'}`}
+      className={`relative flex flex-col items-center rounded-3xl border-2 p-3 text-center transition-colors ${i.soldOut ? 'cursor-not-allowed border-dashed border-brown/20 bg-brown/5' : n ? 'border-terracotta/60 bg-cream shadow-[0_4px_0_rgba(168,87,42,0.18)]' : 'border-brown/10 bg-cream/70'}`}
     >
-      <div ref={cupsRef} className="flex h-20 origin-bottom items-end justify-center">
+      {/* sold out: only the picture fades — the name stays readable, the stamp says why */}
+      <div ref={cupsRef} className={`relative flex h-20 origin-bottom items-end justify-center ${i.soldOut ? 'opacity-35 grayscale' : ''}`}>
         {i.images.map((src, k) => (
           <img key={k} src={src} alt="" className="h-full w-auto object-contain" style={{ marginInline: i.images.length > 1 ? -10 : 0 }} />
         ))}
       </div>
+      <AnimatePresence>
+        {i.soldOut && (
+          <motion.span
+            key="habis"
+            aria-hidden
+            className="pointer-events-none absolute left-1/2 top-9 -translate-x-1/2 rounded-lg border-2 border-terracotta bg-cream px-2.5 py-0.5 font-display text-lg font-bold uppercase tracking-wider text-terracotta shadow-[0_3px_0_rgba(168,87,42,0.25)]"
+            initial={{ scale: 2, opacity: 0, rotate: -20 }}
+            animate={{ scale: 1, opacity: 1, rotate: -8 }}
+            exit={{ scale: 0.6, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 520, damping: 18 }}
+          >
+            Habis
+          </motion.span>
+        )}
+      </AnimatePresence>
       <p className="mt-2 font-display font-bold leading-tight">{i.name}</p>
-      <p className="font-display text-terracotta">{i.soldOut ? 'Habis' : rupiah(i.price)}</p>
+      {i.soldOut ? (
+        <p className="mt-0.5 rounded-full bg-brown/10 px-2.5 py-0.5 font-display text-sm font-semibold text-brown-soft">Stok habis</p>
+      ) : (
+        <p className="font-display text-terracotta">{rupiah(i.price)}</p>
+      )}
       <AnimatePresence>
         {n > 0 && (
           <motion.span key="n" className="absolute right-2 top-2 grid size-7 place-items-center rounded-full bg-terracotta font-display text-sm font-bold text-cream" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
