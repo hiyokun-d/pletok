@@ -6,8 +6,6 @@ import { DRINKS, TAGLINE } from '../data/menu'
 import { useMenu } from '../hooks/useMenu'
 import { SOURCES, STORY } from '../data/story'
 import { EVENT, FEEDBACK_URL, INSTAGRAM_HANDLE, INSTAGRAM_URL } from '../data/event'
-import { useEventPhase } from '../hooks/useEventPhase'
-import { ParticleField } from '../components/ParticleField'
 import { Ornament } from '../components/Ornament'
 import { LogoRig } from '../components/LogoRig'
 import { CupCard } from '../components/CupCard'
@@ -43,7 +41,6 @@ export function MobileSite({ onEgg }: { onEgg: () => void }) {
   const { open: preorder, config: poConfig, promoLeft } = usePreorder()
   const promoLive = preorder && !!poConfig.promo?.on && promoLeft > 0
   const feedback = useFeedbackOpen().open
-  const { phase } = useEventPhase()
   const heroRef = useRef<HTMLElement>(null)
   const storyRef = useRef<HTMLElement>(null)
   const { scrollYProgress: heroP } = useScroll({ target: heroRef, offset: ['start start', 'end start'] })
@@ -69,10 +66,6 @@ export function MobileSite({ onEgg }: { onEgg: () => void }) {
         <motion.div className="absolute -top-2.5 size-6" style={{ left: progressLeft, x: '-50%' }}>
           <Ornament variant="leaf" className="size-6 rotate-90" draw={false} />
         </motion.div>
-      </div>
-
-      <div className="pointer-events-none fixed inset-0 z-0">
-        <ParticleField preset="leaf" overrides={{ count: 22, size: [12, 22] }} speed={phase === 'last-call' ? 1.8 : 1} />
       </div>
 
       {/* ---------- hero ---------- */}
