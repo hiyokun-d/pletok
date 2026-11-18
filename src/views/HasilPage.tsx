@@ -130,9 +130,26 @@ const PICKUP = `> Ambil di ${EVENT.table}, ${EVENT.place} · ${EVENT.campus}\n> 
 /** the order's own live status page — /c/KODECEK opens it straight away, no searching */
 // every message carries it: the page shows the order (and the code, big) — no searching, and the
 // cashier can read it straight off the phone. Built from the private kode cek, never the PLT number.
-const statusLink = (o: Order) => (o.ref ? `\n\nCek status & kode ambilmu di sini:\n${SITE_URL.replace(/^https?:\/\//, '')}/c/${o.ref}` : '')
+// full https:// so every chat app turns it into a tappable link
+const statusLink = (o: Order) => (o.ref ? `\n\nCek status & kode ambilmu di sini:\n${SITE_URL}/c/${o.ref}` : '')
+/** the receipt, line by line — monospace in WhatsApp so the prices stay readable */
+const receipt = (o: Order) =>
+  [
+    '*STRUK PRE-ORDER PLETOK*',
+    '```',
+    ...o.lines.map((l) => `${l.qty}x ${l.name} — ${rupiah(l.price * l.qty)}`),
+    ...(o.promo ? [`Promo — -${rupiah(o.promo)}`] : []),
+    `TOTAL — ${rupiah(o.total)}`,
+    '```',
+    `> Kode ambil: *${o.code}*`,
+    ...(o.ref ? [`> Kode cek: ${o.ref}`] : []),
+    `> Atas nama: ${o.name}`,
+    `> Dipesan: ${dayTime(o.at)} WIB`,
+    ...(o.pay ? [`> Bayar: ${o.pay}${o.sender ? ` (a.n. ${o.sender})` : ''}`] : []),
+    '> Status: LUNAS',
+  ].join('\n')
 const codeMessage = (o: Order) =>
-  `Halo kak ${o.name}! Pembayaran pre-order Pletok kamu sudah kami terima.\n\n> Kode ambil: *${o.code}*\n> Pesanan: ${o.summary} (${rupiah(o.total)})${statusLink(o)}\n\n${PICKUP}\n\nTunjukkan kode ini (atau halaman di link) + sebutkan nama ya. Makasih!`
+  `Halo kak ${o.name}! Pembayaran pre-order Pletok kamu sudah kami terima.\n\n${receipt(o)}${statusLink(o)}\n\n${PICKUP}\n\nTunjukkan kode ini (atau halaman di link) + sebutkan nama ya. Makasih!`
 /** the WhatsApp button on every other status — the code (or kode cek before it's paid) and the pickup */
 const contactMessage = (o: Order) =>
   o.status === 'hold'
