@@ -26,20 +26,82 @@ const write = (q: Payload[]) => {
   }
 }
 
+/* ---------------------------------------------------------------- health: is the Sheet answering?
+ * Every request reports in. Two misses in a row while the phone is online = the Sheet is down:
+ * the status bar tells customers their data is safe on the phone, crew pages turn red. The first
+ * answer after that = recovered: the outboxes flush, and the phone tells the Sheet how long it was
+ * gone (logged in "Keamanan", emailed to the admins) — so an outage never goes unnoticed. */
+const DOWN_AFTER = 2
+export interface Health {
+  offline: boolean
+  /** the Sheet missed DOWN_AFTER times in a row while the phone had internet */
+  down: boolean
+  /** first miss of the current streak */
+  since: number | null
+  fails: number
+  /** when it last came back (0 = never went down) */
+  recoveredAt: number
+}
+let hp = { fails: 0, serverFails: 0, since: null as number | null, recoveredAt: 0 }
+const isOffline = () => typeof navigator !== 'undefined' && !navigator.onLine
+let healthSnap: Health = { offline: isOffline(), down: false, since: null, fails: 0, recoveredAt: 0 }
+const healthSubs = new Set<() => void>()
+const emitHealth = () => {
+  healthSnap = { offline: isOffline(), down: hp.serverFails >= DOWN_AFTER, since: hp.since, fails: hp.fails, recoveredAt: hp.recoveredAt }
+  healthSubs.forEach((f) => f())
+}
+export const health = () => healthSnap
+export const onHealth = (f: () => void) => {
+  healthSubs.add(f)
+  return () => void healthSubs.delete(f)
+}
+/** answers that are a normal "no" (wrong PIN, pre-order closed…) — the Sheet is fine */
+const EXPECTED = ['pin', 'closed', 'empty', 'contact', 'id', 'status', 'image', 'size', 'none', 'type', 'mode', 'input']
+/** did the Sheet itself work? A crash ("Exception: …") or "busy" counts as a miss */
+const sheetOk = (j: { ok?: boolean; error?: string } | null) => !!j && (!!j.ok || EXPECTED.includes(String(j.error)))
+function reportHealth(ok: boolean) {
+  if (ok) {
+    const wasDown = hp.serverFails >= DOWN_AFTER
+    const since = hp.since
+    const fails = hp.fails
+    hp = { fails: 0, serverFails: 0, since: null, recoveredAt: wasDown ? Date.now() : hp.recoveredAt }
+    emitHealth()
+    if (wasDown && since) {
+      // self-recovery: send what waited, wake whoever has a queue of their own, and report the outage
+      void flushOutbox()
+      window.dispatchEvent(new Event('pletok:recovered'))
+      void post({ type: 'incident', page: location.pathname, downFor: Date.now() - since, fails, ua: navigator.userAgent })
+    }
+    return
+  }
+  hp.fails++
+  hp.since ??= Date.now()
+  if (!isOffline()) hp.serverFails++
+  emitHealth()
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', emitHealth)
+  window.addEventListener('offline', emitHealth)
+}
+
 /** a plain-text POST is a "simple" request, so the browser skips the CORS preflight Apps Script can't answer */
 // anything with a PIN tells the Sheet which device sent it — a wrong PIN lands in the "Keamanan" tab
 const withUa = (p: Payload) => ('pin' in p ? { ...p, ua: navigator.userAgent } : p)
 
-async function post(p: Payload): Promise<boolean> {
-  if (!BACKEND) return false
+/** 'ok' · 'no' = the Sheet answered and refused (wrong PIN, closed…) — retrying won't help · 'down' = no usable answer */
+async function send(p: Payload): Promise<'ok' | 'no' | 'down'> {
+  if (!BACKEND) return 'down'
   try {
     const r = await fetch(BACKEND, { method: 'POST', body: JSON.stringify(withUa(p)), keepalive: true })
-    const j = (await r.json()) as { ok?: boolean }
-    return !!j.ok
+    const j = (await r.json()) as { ok?: boolean; error?: string }
+    if (p.type !== 'incident') reportHealth(sheetOk(j))
+    return j.ok ? 'ok' : sheetOk(j) ? 'no' : 'down'
   } catch {
-    return false
+    if (p.type !== 'incident') reportHealth(false)
+    return 'down'
   }
 }
+const post = async (p: Payload) => (await send(p)) === 'ok'
 
 let flushing = false
 export async function flushOutbox() {
@@ -47,7 +109,9 @@ export async function flushOutbox() {
   flushing = true
   try {
     for (const p of read()) {
-      if (!(await post(p))) break // offline or busy — keep the rest for the next try
+      const r = await send(p)
+      if (r === 'down') break // offline or the Sheet is down — keep the rest for the next try
+      // sent, or refused for good (it would block everything behind it forever)
       write(read().filter((q) => q.id !== p.id))
     }
   } finally {
@@ -85,14 +149,41 @@ export interface RemoteStats {
   promoUsed?: number
 }
 
+/* the last good stats live on the phone too: when the Sheet is down the menu, prices and the
+   pre-order settings still load (from the last time it answered) instead of an error page */
+const STATS_KEY = 'pletok:stats'
+function saveStats(s: RemoteStats) {
+  try {
+    localStorage.setItem(STATS_KEY, JSON.stringify({ s, at: Date.now() }))
+  } catch {
+    /* storage blocked */
+  }
+}
+/** the saved stats and when they were fresh — null on a phone that never reached the Sheet */
+export function cachedStats(): { s: RemoteStats; at: number } | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(STATS_KEY) ?? 'null') as { s: RemoteStats; at: number } | null
+    // older than 3 days is a different week's menu — don't pretend
+    return v && Date.now() - v.at < 3 * 86_400_000 ? v : null
+  } catch {
+    return null
+  }
+}
+
 export async function fetchStats(): Promise<RemoteStats | null> {
   if (!BACKEND) return null
   // a crowd-drowned network can hang a request for minutes — give up and count it as a miss
   const abort = new AbortController()
   const t = window.setTimeout(() => abort.abort(), 15_000)
   try {
-    return (await (await fetch(BACKEND, { signal: abort.signal })).json()) as RemoteStats
+    const s = (await (await fetch(BACKEND, { signal: abort.signal })).json()) as RemoteStats & { error?: string }
+    // the Sheet crashed with nothing saved to fall back on → it's a JSON error, still a miss
+    if (s.error) throw new Error(s.error)
+    reportHealth(true)
+    saveStats(s)
+    return s
   } catch {
+    reportHealth(false)
     return null
   } finally {
     window.clearTimeout(t)
@@ -156,8 +247,10 @@ export async function fetchResults(pin: string): Promise<Results | 'pin' | null>
   try {
     const r = await fetch(BACKEND, { method: 'POST', body: JSON.stringify({ type: 'results', pin }) })
     const j = (await r.json()) as Results & { ok: boolean; error?: string }
+    reportHealth(sheetOk(j))
     return j.ok ? j : j.error === 'pin' ? 'pin' : null
   } catch {
+    reportHealth(false)
     return null
   }
 }
@@ -240,18 +333,31 @@ export interface PublicOrder {
 /** a POST whose answer we need (the order code) — retried a few times on a flaky connection */
 async function postJson<T>(p: Payload, tries = 3): Promise<(T & { ok: boolean; error?: string }) | null> {
   if (!BACKEND) return null
+  let last: (T & { ok: boolean; error?: string }) | null = null
   for (let i = 0; i < tries; i++) {
+    // a crowd-drowned network can hang a request for minutes; the Sheet itself may wait ~25 s for its lock
+    const abort = new AbortController()
+    const t = window.setTimeout(() => abort.abort(), 30_000)
     try {
-      const r = await fetch(BACKEND, { method: 'POST', body: JSON.stringify(withUa(p)) })
-      return (await r.json()) as T & { ok: boolean; error?: string }
+      const r = await fetch(BACKEND, { method: 'POST', body: JSON.stringify(withUa(p)), signal: abort.signal })
+      last = (await r.json()) as T & { ok: boolean; error?: string }
+      reportHealth(sheetOk(last))
+      // a crash or "busy" is worth another go, like a dropped connection; a plain "no" isn't
+      if (sheetOk(last)) return last
     } catch {
-      await new Promise((res) => window.setTimeout(res, 1200 * (i + 1)))
+      reportHealth(false)
+    } finally {
+      window.clearTimeout(t)
     }
+    if (i < tries - 1) await new Promise((res) => window.setTimeout(res, 1200 * (i + 1)))
   }
-  return null
+  return last
 }
 
-export function submitPreorder(order: { id: string; items: Array<{ id: string; qty: number }>; name: string; wa: string; note: string; hp: string }) {
+/** answers that mean "this order will never go in" — anything else (no answer, a crash) is worth queueing */
+export const FINAL_PREORDER_ERRORS = ['closed', 'empty', 'contact']
+/** `queuedAt`: when the customer pressed send — an order that waited on the phone through an outage */
+export function submitPreorder(order: { id: string; items: Array<{ id: string; qty: number }>; name: string; wa: string; note: string; hp: string; queuedAt?: number }) {
   return postJson<{ status: OrderStatus; total: number; ref: string; promo?: number; promoWhy?: '' | 'off' | 'full' | 'used' }>({ type: 'preorder', ...order })
 }
 
@@ -375,6 +481,7 @@ function loop() {
 }
 export function onStats(fn: (s: RemoteStats) => void) {
   statSubs.add(fn)
+  if (!lastStats) lastStats = cachedStats()?.s ?? null
   if (lastStats) fn(lastStats)
   if (BACKEND && !polling) {
     polling = true

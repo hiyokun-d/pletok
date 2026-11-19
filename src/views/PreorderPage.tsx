@@ -2,17 +2,19 @@ import { AnimatePresence, motion, useAnimate } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 import {
   CalendarClock,
+  CloudOff,
   MapPin,
   Minus,
   Plus,
   Loader2,
+  Send,
   ShoppingBag,
   TriangleAlert,
 } from "lucide-react";
-import { EVENT } from "../data/event";
+import { ADMIN_WA, EVENT } from "../data/event";
 import { ErrorPage } from "./ErrorPage";
 import { DEFAULT_CUTOFF, PREORDER_ITEMS, rupiah } from "../data/preorder";
-import { BACKEND, findOrders, promoOff, submitPreorder } from "../lib/backend";
+import { BACKEND, FINAL_PREORDER_ERRORS, findOrders, promoOff, submitPreorder } from "../lib/backend";
 import { trackClick } from "../lib/analytics";
 import { usePreorder } from "../hooks/usePreorder";
 import { BackButton } from "../components/BackButton";
@@ -175,6 +177,26 @@ export function PreorderPage() {
       setQty({});
       setOrderId(newId());
       setFlight("away");
+    } else if (!r || !FINAL_PREORDER_ERRORS.includes(String(r.error))) {
+      // Plan B: no answer (or the Sheet crashed) — the order waits on this phone and goes out by
+      // itself once the Sheet is back (same id, so it can never land twice). Nothing is lost.
+      trackClick("preorder-antre");
+      mine.add({
+        id: orderId,
+        at: Date.now(),
+        name: name.trim(),
+        total,
+        saved,
+        status: "hold",
+        code: "",
+        promo: 0,
+        queued: { items: lines.map((i) => ({ id: i.id, qty: qty[i.id] })), name: name.trim(), wa: "0" + wa, note: note.trim(), at: Date.now() },
+        lines: lines.map((i) => ({ id: i.id, name: i.name, qty: qty[i.id], price: i.price })),
+      });
+      setTrackId(orderId);
+      setQty({});
+      setOrderId(newId());
+      setFlight("away");
     } else {
       setFlight(null);
       setError(
@@ -243,6 +265,8 @@ export function PreorderPage() {
                 onBack={() => setTrackId(null)}
                 onProof={() => mine.patch(tracked.id, { proof: true })}
                 checkedAt={mine.checkedAt}
+                onRetry={mine.sendQueued}
+                triedAt={mine.triedAt}
               />
             </motion.section>
           ) : BACKEND && !loaded && stuck ? (
@@ -251,7 +275,7 @@ export function PreorderPage() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
             >
-              <ErrorPage kind={navigator.onLine ? 503 : "offline"} />
+              {navigator.onLine ? <PreorderDown /> : <ErrorPage kind="offline" />}
             </motion.section>
           ) : BACKEND && !loaded ? (
             <motion.section
@@ -681,5 +705,43 @@ function Step({
     >
       {children}
     </motion.button>
+  );
+}
+
+/**
+ * Plan B for a phone that has never reached the Sheet (nothing saved to fall back on): the menu
+ * and the admin's WhatsApp. The page keeps asking in the background and switches by itself
+ * the moment the Sheet answers.
+ */
+function PreorderDown() {
+  return (
+    <div className="flex min-h-[70dvh] flex-col items-center justify-center text-center">
+      <span className="grid size-16 place-items-center rounded-3xl bg-[#e8b53a] text-brown">
+        <CloudOff className="size-8" />
+      </span>
+      <h1 className="mt-4 font-display text-3xl font-bold">Sistem pre-order lagi gangguan</h1>
+      <p className="mt-2 max-w-sm font-display text-brown-soft">
+        Tenang, ini dari sisi kami. Halaman ini terus mencoba dan langsung terbuka sendiri begitu sistem pulih.
+      </p>
+      <p className="mt-3 flex items-center gap-2 font-cond text-sm italic text-brown/60">
+        <Loader2 className="size-3.5 animate-spin" /> Mencoba tersambung…
+      </p>
+      {ADMIN_WA && (
+        <a
+          href={`https://wa.me/${ADMIN_WA}?text=${encodeURIComponent("Halo admin Pletok! Sistem pre-order lagi gangguan, aku mau pesan:\n> ")}`}
+          target="_blank"
+          rel="noreferrer"
+          data-track="preorder-planb-wa"
+          className="mt-6 flex w-full max-w-sm items-center gap-3 rounded-3xl bg-leaf p-4 text-left text-cream shadow-[0_4px_0_#3f5426]"
+        >
+          <Send className="size-5 shrink-0" />
+          <span className="min-w-0 flex-1 font-display leading-tight">
+            <b className="block">Pesan lewat WhatsApp admin</b>
+            <span className="text-sm text-cream/80">Nggak perlu nunggu — admin catat pesananmu langsung</span>
+          </span>
+        </a>
+      )}
+      <a href="/" className="mt-3 font-display text-sm font-semibold text-brown-soft underline">Lihat menu & harga</a>
+    </div>
   );
 }

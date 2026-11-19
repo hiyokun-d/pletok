@@ -1,7 +1,7 @@
 import { AnimatePresence, motion, useAnimate } from 'motion/react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Banknote, Check, Copy, Gift, Landmark, Loader2, Minus, Plus, QrCode, ReceiptText, RotateCcw, ShoppingBasket, TriangleAlert, X } from 'lucide-react'
-import { BACKEND, crewPin, fetchQueue, sendBoothOrder, voidBoothOrder, type BoothLine, type BoothPay, type QueueOrder } from '../lib/backend'
+import { BACKEND, crewPin, enqueue, fetchQueue, sendBoothOrder, voidBoothOrder, type BoothLine, type BoothPay, type QueueOrder } from '../lib/backend'
 import { usePreorder } from '../hooks/usePreorder'
 import { useMenu } from '../hooks/useMenu'
 import { rupiah } from '../data/preorder'
@@ -59,7 +59,7 @@ export function CashierPage() {
   const [orderId, setOrderId] = useState(newId)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState<{ code: string; name: string; at: number } | null>(null)
+  const [done, setDone] = useState<{ code: string; name: string; at: number; queued?: boolean } | null>(null)
   const [history, setHistory] = useState<QueueOrder[] | null>(null)
 
   const drinkOf = (id: string) => menu.drinks.find((d) => d.id === id)
@@ -143,8 +143,14 @@ export function CashierPage() {
     const r = await sendBoothOrder(pin, { id: orderId, lines: order, pay, name: name.trim(), note: '' })
     setSending(false)
     if (r === 'pin') return setPin(null), setWrong(true)
-    // same id on retry → the Sheet hands back the same code instead of a second sale
-    if (!r) return setError('Belum masuk ke Sheet — cek sinyal lalu tekan lagi (aman, nggak dobel).')
+    // Plan B: the Sheet didn't answer — the sale waits in this phone's outbox and goes in by itself
+    // when it's back (same id → the Sheet never counts it twice). The buyer still gets served now.
+    if (!r) {
+      void enqueue({ type: 'booth-order', pin, id: orderId, lines: order, pay, name: name.trim(), note: '' })
+      setDone({ code: '#' + orderId.slice(0, 4).toUpperCase(), name: name.trim(), at: Date.now(), queued: true })
+      reset()
+      return
+    }
     setDone({ code: r, name: name.trim(), at: Date.now() })
     reset()
     void loadHistory()
@@ -418,11 +424,16 @@ export function CashierPage() {
               exit={{ scale: 0.9, opacity: 0 }}
               transition={{ type: 'spring', stiffness: 380, damping: 22 }}
             >
-              <p className="font-cond text-lg italic text-brown-soft">Masuk ke pickup · nomor antrean</p>
+              <p className="font-cond text-lg italic text-brown-soft">{done.queued ? 'Sistem gangguan · tersimpan di HP ini' : 'Masuk ke pickup · nomor antrean'}</p>
               <motion.p className="mt-1 font-display text-7xl font-bold tracking-wide text-terracotta" initial={{ scale: 1.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.15, type: 'spring', stiffness: 300, damping: 14 }}>
                 {done.code}
               </motion.p>
               {done.name && <p className="mt-2 font-display text-xl">a.n. {done.name}</p>}
+              {done.queued && (
+                <p className="mt-3 rounded-2xl bg-[#e8b53a]/35 p-3 text-left font-display text-sm">
+                  Penjualan ini masuk ke Sheet otomatis begitu sistem pulih. <b>Layar pickup belum melihatnya</b> — sampaikan langsung ke barista & panggil pakai nama.
+                </p>
+              )}
               <button type="button" onClick={() => setDone(null)} className="mt-6 w-full rounded-full bg-brown py-3 font-display font-semibold text-cream">
                 Pesanan berikutnya
               </button>

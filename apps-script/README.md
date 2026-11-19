@@ -48,3 +48,31 @@ Changed `Code.gs` later? Go to **Deploy → Manage deployments → ✏️ → Ve
 ## About personal data
 
 Name and contact are **optional**, and contact is only stored if the person ticks "Boleh dihubungi". This follows Indonesia's personal data protection law (UU PDP No. 27/2022): ask for consent, collect only what's needed, and use it only for that purpose. Keep the Sheet private to the team, and don't share the contact column.
+
+## When something breaks (Plan B)
+
+Nothing a customer sends is lost while the Sheet is down. The site keeps working and catches up by itself:
+
+| What breaks | What customers see | What happens to their data |
+|---|---|---|
+| Their phone loses signal | "Offline — data terkirim sendiri saat sinyal balik" | Kept on the phone, sent when the signal is back |
+| The Sheet / Apps Script stops answering (crash, Google hiccup, too busy) | A yellow bar: "Sistem lagi gangguan — datamu aman", plus a button to chat the admin | **Pre-orders** wait on the phone as "Menunggu sistem" and are re-sent every 15 s. The Sheet ignores repeats by ID, so an order never lands twice. Orders sent before the cut-off still count for 6 h after it, and are marked `[masuk tertunda N mnt]` in Catatan. Customers are told **not to pay yet**, and can send the order to the admin on WhatsApp in one tap. **Feedback** and **cashier sales** go into the phone's outbox the same way. |
+| The Sheet comes back | A green "Tersambung lagi" | Everything waiting is sent. The phone reports the outage: a "Gangguan terdeteksi" row appears in **Keamanan** (shown on /hasil) and you get an email |
+| A phone that never loaded /preorder before opens it while the Sheet is down | "Sistem pre-order lagi gangguan" with a **Pesan lewat WhatsApp admin** button | The page keeps trying and opens by itself when the Sheet is back. Phones that loaded it before use their saved menu and settings, and can order as normal |
+| The website itself is down (Vercel) | Phones that visited before still open the saved site (offline cache) | Post on Instagram / the WhatsApp group: "pesan lewat WA admin" with the admin's number |
+
+**Crew pages** (/hasil, /config, /cashier, /pickup) show a red bar at the bottom while the Sheet isn't answering: since when, how many failures, and how much is waiting on that device.
+
+### Alerts to the admins
+
+- **Email:** errors and outages are emailed (at most one per 15 min). Setup: open Apps Script → choose `setupAlerts` → ▶ **Run** → allow. A test email arrives. To send alerts to several people, add a script property `ALERT_EMAIL` = `a@x.com,b@y.com` (Project Settings → Script properties). Otherwise the alert goes to the Sheet's owner.
+- **When Google or Vercel is fully down:** the script can't email about its own outage. A free uptime monitor covers that. On [UptimeRobot](https://uptimerobot.com) (or Better Stack), add two HTTP checks every 5 min, alerting to email / Telegram:
+  1. `https://pletok.hiyokun.dev/link`, which should answer 200
+  2. the Web app URL + `?stats=1` (from `.env.local`), with keyword `preorder`
+
+### If the red bar won't go away
+
+1. Apps Script → **Executions**: look for red rows. The error text says what broke.
+2. "Exceeded maximum execution time" or quota errors: wait a few minutes. Google resets it.
+3. You changed Code.gs? Then **Deploy → Manage deployments → ✏️ → New version** (the URL stays the same).
+4. Still broken: tell customers on Instagram / WhatsApp to order via the admin's WhatsApp. Everything already queued lands by itself once it's fixed.

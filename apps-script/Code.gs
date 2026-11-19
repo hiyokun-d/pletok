@@ -17,6 +17,9 @@
  *   POST {type:'booth-order' | 'booth-void', pin, …} → a walk-in sale in "Kasir" (B-001, B-002…)
  *   POST {type:'queue', pin} / {type:'pickup', pin, src, id, done} → the pickup counter's list, handed over
  *   POST {type:'trap', path, ua, tries} → someone tried the fake /admin page ("Keamanan" tab)
+ *   POST {type:'incident', page, downFor, fails} → a phone couldn't reach us and just got back ("Keamanan" + email)
+ * Something broken (a crash, the lock too busy) is logged in "Keamanan" and emailed to the admins —
+ * at most one email per 15 min. Run setupAlerts once (▶ Run) to allow the emails and get a test one.
  * Every wrong PIN is logged in "Keamanan" and answered 3 s late (one at a time).
  *   GET  ?stats=1                → numbers for the closing screen + current menu state
  *
@@ -181,6 +184,33 @@ function securityLog_(what, from, ua, detail) {
   sheet_('Keamanan', SECURITY_COLS).appendRow([new Date(), what, clip_(from, 60), clip_(ua, 200), clip_(detail, 120)])
 }
 
+/* ---- when something breaks: a row in "Keamanan" + an email (at most one per 15 min, so an outage
+   doesn't flood the inbox). Who gets it: script property ALERT_EMAIL (comma-separated for several
+   admins), else the Sheet's owner. */
+function alertAdmin_(what, detail) {
+  try {
+    securityLog_(what, 'sistem', '', clip_(detail, 120))
+  } catch (e) {
+    /* the Sheet itself may be what's broken */
+  }
+  const cache = CacheService.getScriptCache()
+  if (cache.get('alerted')) return
+  cache.put('alerted', '1', 900)
+  try {
+    const to = PropertiesService.getScriptProperties().getProperty('ALERT_EMAIL') || Session.getEffectiveUser().getEmail()
+    const when = Utilities.formatDate(new Date(), 'Asia/Jakarta', 'dd MMM HH.mm')
+    MailApp.sendEmail(to, 'Pletok: ' + what + ' (' + when + ' WIB)', detail + '\n\nPembeli tetap aman: pesanan & feedback tersimpan di HP mereka dan masuk otomatis begitu sistem pulih.\nCek: Apps Script → Executions. Sheet: ' + SpreadsheetApp.getActiveSpreadsheet().getUrl())
+  } catch (e) {
+    /* emails not allowed yet — run setupAlerts once */
+  }
+}
+/** run once from the editor (▶ Run → setupAlerts): allows the alert emails and sends a test */
+function setupAlerts() {
+  const to = PropertiesService.getScriptProperties().getProperty('ALERT_EMAIL') || Session.getEffectiveUser().getEmail()
+  MailApp.sendEmail(to, 'Pletok: tes peringatan', 'Kalau email ini masuk, peringatan gangguan Pletok sudah aktif.')
+  Logger.log('Tes terkirim ke ' + to)
+}
+
 function sheet_(name, cols) {
   const ss = SpreadsheetApp.getActiveSpreadsheet()
   let sh = ss.getSheetByName(name)
@@ -197,11 +227,16 @@ const json_ = (o) => ContentService.createTextOutput(JSON.stringify(o)).setMimeT
 const clip_ = (v, n) => String(v == null ? '' : v).slice(0, n || 2000)
 
 function doPost(e) {
-  // many phones at once: one writer at a time so rows never collide
+  // many phones at once: one writer at a time so rows never collide. Too busy → a clean "busy" the
+  // phone retries (waitLock would throw outside any guard and Google answers with an HTML error page)
   const lock = LockService.getScriptLock()
-  lock.waitLock(20000)
+  if (!lock.tryLock(25000)) {
+    alertAdmin_('Server penuh', 'Terlalu banyak permintaan sekaligus — ada yang harus mengantre lebih dari 25 detik.')
+    return json_({ ok: false, error: 'busy' })
+  }
+  let b = {}
   try {
-    const b = JSON.parse(e.postData.contents)
+    b = JSON.parse(e.postData.contents)
     const props = PropertiesService.getScriptProperties()
     const now = new Date()
 
@@ -245,7 +280,11 @@ function doPost(e) {
     if (b.type === 'preorder') {
       if (b.hp) return json_({ ok: true, status: 'hold', total: 0 })
       const cfg = preorderConfig_()
-      if (!cfg.enabled || Date.now() > cfg.cutoff) return json_({ ok: false, error: 'closed' })
+      // an order that waited on the phone through an outage still counts if it was sent before the
+      // cut-off (up to 6 h late) — the customer did everything right
+      const queuedAt = Number(b.queuedAt) || 0
+      const inTime = Date.now() <= cfg.cutoff || (queuedAt && queuedAt <= cfg.cutoff && Date.now() - cfg.cutoff < 6 * 3600000)
+      if (!cfg.enabled || !inTime) return json_({ ok: false, error: 'closed' })
       const name = clip_(b.name, 80).trim()
       const wa = String(b.wa || '').replace(/[^0-9+]/g, '')
       if (!name || wa.replace(/\D/g, '').length < 9) return json_({ ok: false, error: 'contact' })
@@ -272,7 +311,8 @@ function doPost(e) {
       const pay = total - promo
       // no pickup code yet: it waits on hold until an admin finds the transfer
       const ref = newRef_(rows)
-      sh.appendRow([now, '', clip_(b.id, 64), name, "'" + wa, lines.map((l) => l.qty + '× ' + l.name).join(', '), pay * 1000, clip_(b.note, 300), STATUS.hold, JSON.stringify(lines), 'BCA', clip_(b.sender, 80), '', ref, '', promo * 1000])
+      const late = queuedAt && Date.now() - queuedAt > 60000 ? '[masuk tertunda ' + Math.round((Date.now() - queuedAt) / 60000) + ' mnt] ' : ''
+      sh.appendRow([now, '', clip_(b.id, 64), name, "'" + wa, lines.map((l) => l.qty + '× ' + l.name).join(', '), pay * 1000, late + clip_(b.note, 300), STATUS.hold, JSON.stringify(lines), 'BCA', clip_(b.sender, 80), '', ref, '', promo * 1000])
       if (promo) CacheService.getScriptCache().remove('stats') // slots left changes for everyone
       return json_({ ok: true, status: 'hold', total: pay, ref: ref, promo: promo, promoWhy: pc.why })
     }
@@ -429,6 +469,18 @@ function doPost(e) {
     // which crew page this PIN opens: admin (everything), cashier (/cashier) or pickup (/pickup)
     if (b.type === 'pin') return json_({ ok: allowed_(b) })
 
+    // a phone that couldn't reach us is back — how long it waited tells us an outage happened
+    // (several phones report the same one: one row + one email per 5 min is enough)
+    if (b.type === 'incident') {
+      const cache = CacheService.getScriptCache()
+      if (!cache.get('incident')) {
+        cache.put('incident', '1', 300)
+        const mins = Math.max(1, Math.round(Number(b.downFor) / 60000) || 1)
+        alertAdmin_('Gangguan terdeteksi', 'Sebuah HP tidak bisa menghubungi sistem selama ±' + mins + ' menit (' + (Number(b.fails) || 0) + '× gagal) di ' + clip_(b.page, 40) + ' — sekarang sudah tersambung lagi.')
+      }
+      return json_({ ok: true })
+    }
+
     // /admin and friends are a decoy — whoever pokes at them ends up in the "Keamanan" tab
     if (b.type === 'trap') {
       securityLog_('Coba buka admin palsu', clip_(b.path, 60), b.ua, Number(b.tries) ? Number(b.tries) + '× coba PIN' : 'buka halaman')
@@ -528,6 +580,7 @@ function doPost(e) {
     }
     return json_({ ok: false, error: 'type' })
   } catch (err) {
+    alertAdmin_('Error server', (b.type || '?') + ': ' + String(err))
     return json_({ ok: false, error: String(err) })
   } finally {
     lock.releaseLock()
@@ -539,6 +592,17 @@ function doGet() {
   const cache = CacheService.getScriptCache()
   const hit = cache.get('stats')
   if (hit) return ContentService.createTextOutput(hit).setMimeType(ContentService.MimeType.JSON)
+  try {
+    return stats_(cache)
+  } catch (err) {
+    // the Sheet is having a moment: the last good answer keeps every phone's menu working
+    alertAdmin_('Error server', 'stats: ' + String(err))
+    const last = cache.get('stats-last')
+    return ContentService.createTextOutput(last || JSON.stringify({ error: String(err) })).setMimeType(ContentService.MimeType.JSON)
+  }
+}
+
+function stats_(cache) {
   const ss = SpreadsheetApp.getActiveSpreadsheet()
   const fb = ss.getSheetByName('Feedback')
   const sc = ss.getSheetByName('Scans')
@@ -574,6 +638,7 @@ function doGet() {
     promoUsed: promoTaken_(orderRows_(orderSheet_())).length,
   })
   cache.put('stats', out, 10)
+  cache.put('stats-last', out, 21600)
   return ContentService.createTextOutput(out).setMimeType(ContentService.MimeType.JSON)
 }
 

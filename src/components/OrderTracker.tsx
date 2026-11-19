@@ -1,9 +1,9 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
-import { ArrowLeft, ArrowRight, Ban, Check, Gift, CheckCircle2, ChevronDown, Copy, Hourglass, ImageUp, KeyRound, Landmark, Loader2, MapPin, MessageCircle, Phone, QrCode, RefreshCw, Search, ShieldAlert, XCircle } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Ban, Check, CloudOff, Send, Gift, CheckCircle2, ChevronDown, Copy, Hourglass, ImageUp, KeyRound, Landmark, Loader2, MapPin, MessageCircle, Phone, QrCode, RefreshCw, Search, ShieldAlert, XCircle } from 'lucide-react'
 import { ADMIN_NAME, ADMIN_WA, EVENT } from '../data/event'
 import { rupiah } from '../data/preorder'
-import { findOrders, lookupOrders, setPreorderPay, uploadProof, type OrderStatus, type PreorderConfig, type PreorderPay, type Promo, type PublicOrder } from '../lib/backend'
+import { FINAL_PREORDER_ERRORS, findOrders, lookupOrders, setPreorderPay, submitPreorder, uploadProof, type OrderStatus, type PreorderConfig, type PreorderPay, type Promo, type PublicOrder } from '../lib/backend'
 import { spring } from '../lib/motion'
 import { ParticleField } from './ParticleField'
 import { QrisCode } from './QrisCode'
@@ -27,6 +27,11 @@ export interface MyOrder {
   proof?: boolean
   /** first-N promo discount (thousands) the Sheet gave, already off `total` */
   promo?: number
+  /** the Sheet couldn't be reached when they pressed send: the order waits on this phone and is
+   *  re-sent until it lands (the Sheet skips a repeat of the same id, so retries never double it) */
+  queued?: { items: Array<{ id: string; qty: number }>; name: string; wa: string; note: string; at: number }
+  /** the Sheet answered a queued order with a final no ('closed' / 'empty' / 'contact') */
+  failed?: string
   /** BCA transfer or QRIS — picked on the hold screen */
   pay?: PreorderPay
   /** the screen promised a promo slot but they were all gone by the time the order landed */
@@ -83,7 +88,7 @@ export function useMyOrders() {
   // the hold room shows when it last asked, so waiting never feels stuck
   const [checkedAt, setCheckedAt] = useState<number>()
   const refresh = useCallback(async () => {
-    const ids = load().filter((o) => o.status === 'hold' || o.status === 'process' || o.status === 'rejected').map((o) => o.id)
+    const ids = load().filter((o) => !o.queued && !o.failed && (o.status === 'hold' || o.status === 'process' || o.status === 'rejected')).map((o) => o.id)
     if (!ids.length) return
     const r = await lookupOrders(ids)
     if (!r) return
@@ -111,8 +116,60 @@ export function useMyOrders() {
       document.removeEventListener('visibilitychange', vis)
     }
   }, [waiting, refresh])
-  return { orders, add, merge, patch, checkedAt }
+  // Plan B: orders that couldn't reach the Sheet go out again every 15 s, when the signal comes
+  // back, when the page is looked at again, and the moment any request finds the Sheet back up
+  const sending = useRef(false)
+  const [triedAt, setTriedAt] = useState<number>()
+  const sendQueued = useCallback(async () => {
+    if (sending.current) return
+    sending.current = true
+    try {
+      for (const o of load().filter((x) => x.queued)) {
+        const q = o.queued!
+        const r = await submitPreorder({ id: o.id, items: q.items, name: q.name, wa: q.wa, note: q.note, hp: '', queuedAt: q.at })
+        setTriedAt(Date.now())
+        if (r?.ok) patch(o.id, { queued: undefined, status: r.status, total: r.total, ref: r.ref, promo: r.promo ?? 0 })
+        else if (r && FINAL_PREORDER_ERRORS.includes(String(r.error))) patch(o.id, { queued: undefined, failed: String(r.error) })
+        else break // still down — the rest wait for the next round
+      }
+    } finally {
+      sending.current = false
+    }
+  }, [patch])
+  const queuedN = orders.filter((o) => o.queued).length
+  useEffect(() => {
+    if (!queuedN) return
+    void sendQueued()
+    const t = window.setInterval(() => void sendQueued(), 15_000)
+    const go = () => void sendQueued()
+    const vis = () => document.visibilityState === 'visible' && go()
+    window.addEventListener('online', go)
+    window.addEventListener('pletok:recovered', go)
+    document.addEventListener('visibilitychange', vis)
+    return () => {
+      window.clearInterval(t)
+      window.removeEventListener('online', go)
+      window.removeEventListener('pletok:recovered', go)
+      document.removeEventListener('visibilitychange', vis)
+    }
+  }, [queuedN, sendQueued])
+  return { orders, add, merge, patch, checkedAt, sendQueued, triedAt }
 }
+
+/** the order as a WhatsApp message to the admin — Plan B when the system is down */
+export const orderToAdmin = (o: Pick<MyOrder, 'id' | 'name' | 'total' | 'lines'> & { wa?: string; note?: string }) =>
+  `https://wa.me/${ADMIN_WA}?text=${encodeURIComponent(
+    [
+      'Halo admin Pletok! Sistem pre-order lagi gangguan, aku mau pesan:',
+      ...o.lines.map((l) => `> ${l.qty}x ${l.name} (${rupiah(l.price * l.qty)})`),
+      `Total: ${rupiah(o.total)}`,
+      `Nama: ${o.name}`,
+      ...(o.wa ? [`WA: ${o.wa}`] : []),
+      ...(o.note ? [`Catatan: ${o.note}`] : []),
+      `ID pesanan: ${o.id.slice(0, 8)}`,
+      '(pesanan ini juga tersimpan di HP-ku dan masuk otomatis begitu sistem pulih — ID-nya sama)',
+    ].join('\n'),
+  )}`
 
 /* ------------------------------------------------------------------ bits */
 
@@ -224,7 +281,13 @@ export function MyOrdersList({ orders, onOpen }: { orders: MyOrder[]; onOpen: (i
             </span>
             <span className="font-cond text-sm italic text-brown-soft">{rupiah(o.total)} · a.n. {o.name}</span>
           </span>
-          <StatusPill status={o.status} small />
+          {o.queued ? (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#e8b53a] px-2.5 py-0.5 font-display text-xs font-semibold text-brown"><CloudOff className="size-3 animate-pulse" /> Antre</span>
+          ) : o.failed ? (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-terracotta px-2.5 py-0.5 font-display text-xs font-semibold text-cream"><XCircle className="size-3" /> Gagal</span>
+          ) : (
+            <StatusPill status={o.status} small />
+          )}
         </motion.button>
       ))}
     </section>
@@ -535,7 +598,7 @@ function AutoCheck({ at }: { at?: number }) {
  * One order, live: while it's on hold it shows how to pay (BCA transfer or QRIS) and waits;
  * the moment an admin verifies the transfer, it turns into the pickup code.
  */
-export function OrderTracker({ order, config, onBack, onProof, checkedAt }: { order: MyOrder; config: PreorderConfig; onBack: () => void; onProof: () => void; checkedAt?: number }) {
+export function OrderTracker({ order, config, onBack, onProof, checkedAt, onRetry, triedAt }: { order: MyOrder; config: PreorderConfig; onBack: () => void; onProof: () => void; checkedAt?: number; onRetry?: () => void; triedAt?: number }) {
   const bca = config.bca ?? { number: '', holder: '' }
   // the Sheet hears which one they picked, so the crew knows where to look for the money
   const [pay, setPay] = useState<PreorderPay>(order.pay ?? 'BCA')
@@ -558,6 +621,8 @@ export function OrderTracker({ order, config, onBack, onProof, checkedAt }: { or
   useEffect(() => {
     if (fresh) setPromoBurst(Date.now() + 500)
   }, [order.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (order.queued || order.failed) return <QueuedOrder order={order} onBack={onBack} onRetry={onRetry} triedAt={triedAt} />
 
   return (
     <div className="flex flex-col items-center text-center">
@@ -708,6 +773,98 @@ export function OrderTracker({ order, config, onBack, onProof, checkedAt }: { or
         Tersimpan di HP ini — buka /preorder lagi kapan saja. Ganti HP? Pakai <b>kode cek</b>{order.ref ? ` ${order.ref}` : ''} atau nomor WA + nama di "Cek pesanan".
       </p>
       <AdminContact className="mt-3 max-w-sm text-left" />
+    </div>
+  )
+}
+
+const FAILED_WHY: Record<string, string> = {
+  closed: 'Pre-order keburu tutup waktu sistem kami pulih.',
+  empty: 'Ada menu di pesananmu yang sudah tidak tersedia.',
+  contact: 'Nama atau nomor WhatsApp-nya tidak terbaca sistem.',
+}
+
+/**
+ * Plan B, on the customer's side: the order is safe on this phone while the Sheet is down and goes
+ * out by itself once it's back. Nothing to pay yet — the final total (promo) and kode cek come from
+ * the Sheet. Can't wait? The whole order goes to the admin on WhatsApp in one tap.
+ */
+function QueuedOrder({ order, onBack, onRetry, triedAt }: { order: MyOrder; onBack: () => void; onRetry?: () => void; triedAt?: number }) {
+  const [retrying, setRetrying] = useState(false)
+  const failed = !!order.failed
+  return (
+    <div className="flex flex-col items-center text-center">
+      <button type="button" onClick={onBack} className="mb-4 inline-flex items-center gap-1.5 self-start font-display font-semibold text-brown-soft">
+        <ArrowLeft className="size-4" /> Kembali
+      </button>
+      {failed ? (
+        <span className="inline-flex items-center gap-2 rounded-full bg-terracotta px-4 py-1.5 font-display text-sm font-semibold text-cream"><XCircle className="size-4" /> Pesanan belum bisa diterima</span>
+      ) : (
+        <span className="inline-flex items-center gap-2 rounded-full bg-[#e8b53a] px-4 py-1.5 font-display text-sm font-semibold text-brown"><CloudOff className="size-4 animate-pulse" /> Menunggu sistem</span>
+      )}
+      <h1 className="mt-4 font-display text-3xl font-bold">{failed ? 'Yah, belum bisa masuk' : 'Pesananmu aman di HP ini'}</h1>
+      <p className="mt-2 max-w-sm font-display text-brown-soft">
+        {failed
+          ? `${FAILED_WHY[order.failed!] ?? 'Sistem menolak pesanan ini.'} Chat admin ya — kami bantu langsung.`
+          : 'Sistem Pletok lagi gangguan sebentar. Pesananmu sudah tersimpan dan terkirim otomatis begitu sistem pulih — biarkan halaman ini terbuka, atau buka /preorder lagi nanti.'}
+      </p>
+      {!failed && (
+        <>
+          <p className="mt-3 flex items-center gap-2 font-cond text-sm italic text-brown/60">
+            <Loader2 className="size-3.5 animate-spin" /> Dicoba lagi tiap 15 detik{triedAt ? ` · terakhir ${new Date(triedAt).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}
+          </p>
+          {onRetry && (
+            <button
+              type="button"
+              disabled={retrying}
+              onClick={async () => {
+                setRetrying(true)
+                await onRetry()
+                setRetrying(false)
+              }}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-full border-2 border-brown/15 px-4 py-2 font-display text-sm font-semibold"
+            >
+              {retrying ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />} Coba kirim sekarang
+            </button>
+          )}
+          <p className="mt-5 w-full max-w-sm rounded-2xl bg-[#e8b53a]/30 p-4 text-left font-display text-sm">
+            <b>Jangan bayar dulu ya.</b> Total final (termasuk promo), cara bayar & kode cek muncul di sini begitu pesananmu masuk ke sistem.
+          </p>
+        </>
+      )}
+
+      {ADMIN_WA && (
+        <a
+          href={orderToAdmin({ ...order, wa: order.queued?.wa, note: order.queued?.note })}
+          target="_blank"
+          rel="noreferrer"
+          data-track="preorder-planb-wa"
+          className="mt-4 flex w-full max-w-sm items-center gap-3 rounded-3xl bg-leaf p-4 text-left text-cream shadow-[0_4px_0_#3f5426]"
+        >
+          <Send className="size-5 shrink-0" />
+          <span className="min-w-0 flex-1 font-display leading-tight">
+            <b className="block">{failed ? 'Chat admin soal pesanan ini' : 'Nggak mau nunggu? Kirim ke admin'}</b>
+            <span className="text-sm text-cream/80">Pesananmu langsung tersusun di WhatsApp · {ADMIN_NAME ? ADMIN_NAME.charAt(0) + ADMIN_NAME.slice(1).toLowerCase() : 'admin'}</span>
+          </span>
+          <ArrowRight className="size-5 shrink-0" />
+        </a>
+      )}
+
+      <div className="mt-6 w-full max-w-sm rounded-3xl border-2 border-brown/10 bg-cream/80 p-4 text-left">
+        {order.lines.map((i) => (
+          <p key={i.id} className="flex justify-between font-display">
+            <span>{i.qty}× {i.name}</span>
+            <span className="tabular-nums">{rupiah(i.price * i.qty)}</span>
+          </p>
+        ))}
+        <p className="mt-2 flex justify-between border-t border-brown/10 pt-2 font-display text-lg font-bold">
+          <span>Perkiraan total</span>
+          <span className="tabular-nums">{rupiah(order.total)}</span>
+        </p>
+        <p className="mt-1 font-cond text-xs italic text-brown/55">Total final dihitung sistem (promo pemesan pertama ikut dicek saat pesanan masuk).</p>
+      </div>
+      <p className="mt-5 flex items-center gap-2 font-display text-brown-soft">
+        <MapPin className="size-4" /> Ambil di {EVENT.table} · {EVENT.dateLabel}, {EVENT.timeLabel}
+      </p>
     </div>
   )
 }
