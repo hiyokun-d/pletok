@@ -56,7 +56,7 @@ export const onHealth = (f: () => void) => {
   return () => void healthSubs.delete(f)
 }
 /** answers that are a normal "no" (wrong PIN, pre-order closed…) — the Sheet is fine */
-const EXPECTED = ['pin', 'closed', 'empty', 'contact', 'id', 'status', 'image', 'size', 'none', 'type', 'mode', 'input']
+const EXPECTED = ['pin', 'closed', 'empty', 'contact', 'id', 'status', 'image', 'size', 'none', 'type', 'mode', 'input', 'proof', 'taken']
 /** did the Sheet itself work? A crash ("Exception: …") or "busy" counts as a miss */
 const sheetOk = (j: { ok?: boolean; error?: string } | null) => !!j && (!!j.ok || EXPECTED.includes(String(j.error)))
 function reportHealth(ok: boolean) {
@@ -328,6 +328,8 @@ export interface PublicOrder {
   pay?: PreorderPay
   /** first-N promo discount (thousands), already taken off `total` */
   promo?: number
+  /** last 4 digits of the WhatsApp number it was ordered with — the other pickup proof */
+  wa4?: string
 }
 
 /** a POST whose answer we need (the order code) — retried a few times on a flaky connection */
@@ -523,6 +525,16 @@ export interface QueueOrder {
   note: string
   done: boolean
   lines: Array<{ id: string; name: string; qty: number; price: number; drinks?: string[] }>
+  /** pre-orders: hashes of the pickup proofs (kode cek / last 4 WA digits) — check with proofMatches */
+  vref?: string
+  vwa?: string
+  /** pre-orders: how it was verified when handed over ("kode cek · 14.05") */
+  pickedBy?: string
+  /** booth sales: the kode cek on the buyer's receipt page, to compare at pickup */
+  ref?: string
+  /** booth sales: the barista called it — the buyer's receipt page is ringing */
+  ready?: boolean
+  readyAt?: number
 }
 
 export async function fetchQueue(pin: string): Promise<QueueOrder[] | 'pin' | null> {
@@ -543,8 +555,61 @@ export async function checkBoothOrders(pin: string, ids: string[]) {
   return r?.ok ? r.found : r?.error === 'pin' ? ('pin' as const) : null
 }
 
+/** "siap": the drink is ready — the buyer's receipt page (/r/<id>) rings */
+export async function markReady(pin: string, id: string) {
+  return !!(await postJson({ type: 'pickup', pin, src: 'booth', id, ready: true }, 2))?.ok
+}
+
+/** a booth sale's live receipt — everything comes from the Sheet, the QR only carries the id */
+export interface BoothReceipt {
+  code: string
+  ref: string
+  name: string
+  at: number
+  total: number
+  pay: string
+  lines: Array<{ name: string; qty: number; price: number }>
+  status: 'process' | 'ready' | 'done' | 'void'
+  readyAt: number
+  doneAt: number
+}
+/** null = no answer (try again) · 'none' = the Sheet doesn't have this sale (yet) */
+export async function fetchReceipt(id: string): Promise<BoothReceipt | 'none' | null> {
+  if (!BACKEND) return null
+  const abort = new AbortController()
+  const t = window.setTimeout(() => abort.abort(), 15_000)
+  try {
+    const r = (await (await fetch(`${BACKEND}?r=${encodeURIComponent(id)}`, { signal: abort.signal })).json()) as { ok: boolean; receipt?: BoothReceipt }
+    reportHealth(true)
+    return r.ok && r.receipt ? r.receipt : 'none'
+  } catch {
+    reportHealth(false)
+    return null
+  } finally {
+    window.clearTimeout(t)
+  }
+}
+
 export async function voidBoothOrder(pin: string, id: string) {
   return !!(await postJson({ type: 'booth-void', pin, id }, 2))?.ok
+}
+
+const normProof = (t: string) => t.toUpperCase().replace(/[^A-Z0-9]/g, '')
+const sha256 = async (t: string) =>
+  [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)))].map((b) => b.toString(16).padStart(2, '0')).join('')
+/** does what the customer showed / said match this pre-order? Checked on the device — works offline */
+export async function proofMatches(o: QueueOrder, typed: string): Promise<'kode cek' | '4 digit WA' | null | 'unknown'> {
+  if (!o.vref && !o.vwa) return 'unknown' // an older Sheet that doesn't send the hashes — it checks itself
+  const p = normProof(typed)
+  if (!p) return null
+  if (o.vref && (await sha256(`${o.id}:${p}`)) === o.vref) return 'kode cek'
+  if (o.vwa && /^\d{4}$/.test(p) && (await sha256(`${o.id}:${p}`)) === o.vwa) return '4 digit WA'
+  return null
+}
+/** hand a pre-order over: with its proof, or `manual` (a reason) — the Sheet checks again and refuses a second pickup */
+export async function pickUpPreorder(pin: string, id: string, proof: { proof?: string; manual?: string }) {
+  const r = await postJson<{ by?: string }>({ type: 'pickup', pin, src: 'po', id, done: true, ...proof }, 2)
+  return r ? { ok: r.ok, error: r.error, by: r.by } : null
 }
 
 export async function markPickedUp(pin: string, src: QueueOrder['src'], id: string, done: boolean) {

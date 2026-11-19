@@ -7,6 +7,8 @@ import { useMenu } from '../hooks/useMenu'
 import { rupiah } from '../data/preorder'
 import { ParticleField } from '../components/ParticleField'
 import { QrisCode } from '../components/QrisCode'
+import { LinkQr } from '../components/LinkQr'
+import { SITE_URL } from '../data/event'
 import { downloadLedger, ledger, markSent, markVoid, onLedger, reconcile, record, sync, type Reconciled } from '../lib/boothLedger'
 import { Card, CrewNav, Empty, PinGate, Shell, hhmm, useCrewPage } from './adminUi'
 
@@ -60,7 +62,8 @@ export function CashierPage() {
   const [orderId, setOrderId] = useState(newId)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState<{ code: string; name: string; at: number; queued?: boolean } | null>(null)
+  // the sale just paid (or one re-opened from the history): its number + the receipt QR for the buyer
+  const [done, setDone] = useState<{ id: string; code: string; name: string; at: number; queued?: boolean; again?: boolean } | null>(null)
   const [history, setHistory] = useState<QueueOrder[] | null>(null)
 
   const drinkOf = (id: string) => menu.drinks.find((d) => d.id === id)
@@ -149,12 +152,12 @@ export function CashierPage() {
     // Plan B: the Sheet didn't answer — the sale stays "pending" in this phone's log and goes in by
     // itself when it's back (same id → the Sheet never counts it twice). The buyer still gets served now.
     if (!r) {
-      setDone({ code: '#' + orderId.slice(0, 4).toUpperCase(), name: name.trim(), at: Date.now(), queued: true })
+      setDone({ id: orderId, code: '#' + orderId.slice(0, 4).toUpperCase(), name: name.trim(), at: Date.now(), queued: true })
       reset()
       return
     }
     markSent(orderId, r)
-    setDone({ code: r, name: name.trim(), at: Date.now() })
+    setDone({ id: orderId, code: r, name: name.trim(), at: Date.now() })
     reset()
     void loadHistory()
   }
@@ -408,7 +411,7 @@ export function CashierPage() {
       </div>
 
       <LocalLog pin={pin} onSynced={loadHistory} />
-      <History orders={history} pin={pin} total={{ tunai: sum('tunai'), qris: sum('qris'), bca: sum('transfer bca'), n: sold.length }} onChange={loadHistory} />
+      <History onReceipt={(o) => setDone({ id: o.id, code: o.code, name: o.name, at: Date.now(), again: true })} orders={history} pin={pin} total={{ tunai: sum('tunai'), qris: sum('qris'), bca: sum('transfer bca'), n: sold.length }} onChange={loadHistory} />
 
       {/* the number to call out, big */}
       <AnimatePresence>
@@ -422,13 +425,14 @@ export function CashierPage() {
             onClick={() => setDone(null)}
           >
             <motion.div
-              className="w-full max-w-sm rounded-[2rem] bg-cream p-8 text-center"
+              onClick={(e) => e.stopPropagation()}
+              className="max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto rounded-[2rem] bg-cream p-6 text-center sm:p-8"
               initial={{ scale: 0.6, y: 40, rotate: -4 }}
               animate={{ scale: 1, y: 0, rotate: 0 }}
               exit={{ scale: 0.9, opacity: 0 }}
               transition={{ type: 'spring', stiffness: 380, damping: 22 }}
             >
-              <p className="font-cond text-lg italic text-brown-soft">{done.queued ? 'Sistem gangguan · tersimpan di HP ini' : 'Masuk ke pickup · nomor antrean'}</p>
+              <p className="font-cond text-lg italic text-brown-soft">{done.again ? 'Tunjukkan struk lagi' : done.queued ? 'Sistem gangguan · tersimpan di HP ini' : 'Masuk ke pickup · nomor antrean'}</p>
               <motion.p className="mt-1 font-display text-7xl font-bold tracking-wide text-terracotta" initial={{ scale: 1.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.15, type: 'spring', stiffness: 300, damping: 14 }}>
                 {done.code}
               </motion.p>
@@ -438,8 +442,13 @@ export function CashierPage() {
                   Penjualan ini masuk ke Sheet otomatis begitu sistem pulih. <b>Layar pickup belum melihatnya</b> — sampaikan langsung ke barista & panggil pakai nama.
                 </p>
               )}
-              <button type="button" onClick={() => setDone(null)} className="mt-6 w-full rounded-full bg-brown py-3 font-display font-semibold text-cream">
-                Pesanan berikutnya
+              {/* the receipt: the buyer scans, gets the live struk + a ring when it's ready */}
+              <div className="mx-auto mt-4 w-48 sm:w-56">
+                <LinkQr url={`${SITE_URL}/r/${done.id}`} />
+              </div>
+              <p className="mt-2 font-display text-sm font-semibold">Minta pembeli scan → struk + dikabari saat siap</p>
+              <button type="button" onClick={() => setDone(null)} className="mt-5 w-full rounded-full bg-brown py-3 font-display font-semibold text-cream">
+                {done.again ? 'Tutup' : 'Pesanan berikutnya'}
               </button>
             </motion.div>
           </motion.div>
@@ -578,7 +587,7 @@ function SellTile({ item: i, n, index, onAdd }: { item: SellItem; n: number; ind
 }
 
 /** today's booth sales; a mistake can be cancelled (tap twice) until it's been picked up */
-function History({ orders, pin, total, onChange }: { orders: QueueOrder[] | null; pin: string; total: { tunai: number; qris: number; bca: number; n: number }; onChange: () => void }) {
+function History({ orders, pin, total, onChange, onReceipt }: { onReceipt: (o: QueueOrder) => void; orders: QueueOrder[] | null; pin: string; total: { tunai: number; qris: number; bca: number; n: number }; onChange: () => void }) {
   const [arm, setArm] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   return (
@@ -598,6 +607,9 @@ function History({ orders, pin, total, onChange }: { orders: QueueOrder[] | null
               </span>
               <span className="font-cond text-sm italic text-brown/55">{hhmm(o.at)} · {o.pay}</span>
               <span className="w-20 text-right tabular-nums">{rupiah(o.total)}</span>
+              <button type="button" onClick={() => onReceipt(o)} aria-label={`QR struk ${o.code}`} className="flex items-center gap-1 rounded-full border border-brown/15 px-2.5 py-1 text-xs font-semibold text-brown-soft">
+                <QrCode className="size-3" /> Struk
+              </button>
               {o.done ? (
                 <span className="rounded-full bg-leaf/15 px-2.5 py-1 text-xs font-semibold text-leaf">Diambil</span>
               ) : (

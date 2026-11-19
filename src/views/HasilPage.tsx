@@ -264,7 +264,7 @@ const receipt = (o: Order) =>
     '> Status: LUNAS',
   ].join('\n')
 const codeMessage = (o: Order) =>
-  `Halo kak ${o.name}! Pembayaran pre-order Pletok kamu sudah kami terima.\n\n${receipt(o)}${statusLink(o)}\n\n${PICKUP}\n\nTunjukkan kode ini (atau halaman di link) + sebutkan nama ya. Makasih!`
+  `Halo kak ${o.name}! Pembayaran pre-order Pletok kamu sudah kami terima.\n\n${receipt(o)}${statusLink(o)}\n\n${PICKUP}\n\nSaat ambil: sebut kode ambil + nama pemesan. Biar lebih cepat & aman, tunjukkan juga *kode cek*-nya. Diambilin teman? Teruskan pesan ini ke dia. Makasih!`
 /** the WhatsApp button on every other status — the code (or kode cek before it's paid) and the pickup */
 const contactMessage = (o: Order) =>
   o.status === 'hold'

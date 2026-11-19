@@ -36,6 +36,8 @@ export interface MyOrder {
   pay?: PreorderPay
   /** the screen promised a promo slot but they were all gone by the time the order landed */
   promoMissed?: boolean | 'used'
+  /** last 4 digits of the WhatsApp number — shown as the other pickup proof */
+  wa4?: string
 }
 
 const KEY = 'pletok:orders'
@@ -70,7 +72,7 @@ export function useMyOrders() {
       const next = [...os]
       found.forEach((f) => {
         const i = next.findIndex((o) => o.id === f.id)
-        const o: MyOrder = { ...(i >= 0 ? next[i] : { saved: 0 }), id: f.id, at: f.at, name: f.name, total: f.total, lines: f.lines, status: f.status, code: f.code, ref: f.ref, proof: f.proof, promo: f.promo, pay: f.pay }
+        const o: MyOrder = { ...(i >= 0 ? next[i] : { saved: 0 }), id: f.id, at: f.at, name: f.name, total: f.total, lines: f.lines, status: f.status, code: f.code, ref: f.ref, proof: f.proof, promo: f.promo, pay: f.pay, wa4: f.wa4 }
         if (i >= 0) next[i] = o
         else next.push(o)
       })
@@ -98,7 +100,7 @@ export function useMyOrders() {
       const next = os.flatMap((o) => {
         const u = r.find((x) => x.id === o.id)
         if (!u) return ids.includes(o.id) ? [] : [o]
-        return [{ ...o, status: u.status, total: u.total || o.total, code: u.code || o.code, ref: u.ref || o.ref, proof: u.proof || o.proof, promo: u.promo ?? o.promo, pay: u.pay ?? o.pay }]
+        return [{ ...o, status: u.status, total: u.total || o.total, code: u.code || o.code, ref: u.ref || o.ref, proof: u.proof || o.proof, promo: u.promo ?? o.promo, pay: u.pay ?? o.pay, wa4: u.wa4 ?? o.wa4 }]
       })
       store(next)
       return next
@@ -654,6 +656,25 @@ export function OrderTracker({ order, config, onBack, onProof, checkedAt, onRetr
             <p className="mt-3 font-display text-lg">
               atas nama <b>{order.name}</b>
             </p>
+            {order.status === 'process' && order.ref && (
+              <div className="mt-4 w-full max-w-sm rounded-3xl border-2 border-dashed border-leaf/50 bg-leaf/10 p-4 text-left">
+                <p className="font-display font-bold">Saat ambil di booth, tunjukkan ini</p>
+                <div className={`mt-2 grid gap-2 ${order.wa4 ? 'grid-cols-2' : ''}`}>
+                  <div className="rounded-2xl bg-cream px-3 py-2 text-center">
+                    <p className="font-cond text-xs italic text-brown-soft">Kode cek</p>
+                    <p className="font-display text-2xl font-bold tracking-[0.15em]">{order.ref}</p>
+                  </div>
+                  {order.wa4 && (
+                    <div className="rounded-2xl bg-cream px-3 py-2 text-center">
+                      <p className="font-cond text-xs italic text-brown-soft">4 angka terakhir WA</p>
+                      <p className="font-display text-2xl font-bold tracking-[0.15em]">{order.wa4}</p>
+                    </div>
+                  )}
+                </div>
+                <p className="mt-2 font-display text-sm text-brown-soft">Sebut kode <b>{order.code}</b>, lalu salah satu di atas. Lupa? Nama pemesan juga bisa.</p>
+                <p className="mt-1 font-display text-sm text-brown-soft">Diambilin teman? Teruskan pesan WhatsApp dari kami / link halaman ini ke dia.</p>
+              </div>
+            )}
           </motion.div>
         ) : order.status === 'rejected' ? (
           <motion.div key="rejected" className="mt-4 flex max-w-sm flex-col items-center" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>

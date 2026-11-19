@@ -15,8 +15,13 @@
  *   POST {type:'wipe', pin, what:['orders','booth','feedback','scans','security','proofs']} → clear test data (backs up first)
  *   POST {type:'pin', pin} → is this the crew PIN (one PIN for /hasil, /config, /cashier, /pickup)
  *   POST {type:'booth-order' | 'booth-void', pin, …} → a walk-in sale in "Kasir" (B-001, B-002…)
+ *   GET  ?r=<id> → a booth sale's live receipt (/r/<id>: the QR the buyer scans) — by its random id only,
+ *     so nobody can open someone else's. No lock, one shared 4 s cache: a crowd of open receipts is cheap
+ *   POST {type:'pickup', pin, src:'booth', id, ready:true} → "siap": the buyer's receipt page rings
  *   POST {type:'booth-check', pin, ids} → which of the cashier phone's saved sales the Sheet already has
- *   POST {type:'queue', pin} / {type:'pickup', pin, src, id, done} → the pickup counter's list, handed over
+ *   POST {type:'queue', pin} / {type:'pickup', pin, src, id, done, proof?, manual?} → the pickup counter's list, handed over.
+ *     A pre-order's proof is optional: its kode cek / last 4 WhatsApp digits, or the crew checks the
+ *     name ("cek nama"). How it was checked is written down, and nothing is ever handed over twice.
  *   POST {type:'trap', path, ua, tries} → someone tried the fake /admin page ("Keamanan" tab)
  *   POST {type:'incident', page, downFor, fails} → a phone couldn't reach us and just got back ("Keamanan" + email)
  * Something broken (a crash, the lock too busy) is logged in "Keamanan" and emailed to the admins —
@@ -33,7 +38,7 @@ const SCAN_COLS = ['Waktu', 'Tujuan', 'Perangkat']
 const DRINK_NAMES = { original: 'Original', lychee: 'Lychee Sparkling', yakult: 'Yakult' }
 
 /* ---- pre-order: the Sheet is the source of truth for what's on sale and what it costs */
-const ORDER_COLS = ['Waktu', 'Kode', 'ID', 'Nama', 'WhatsApp', 'Pesanan', 'Total (Rp)', 'Catatan', 'Status', 'Detail (JSON)', 'Bayar via', 'Nama rekening pengirim', 'Kode terkirim', 'Kode cek', 'Bukti transfer', 'Promo (Rp)']
+const ORDER_COLS = ['Waktu', 'Kode', 'ID', 'Nama', 'WhatsApp', 'Pesanan', 'Total (Rp)', 'Catatan', 'Status', 'Detail (JSON)', 'Bayar via', 'Nama rekening pengirim', 'Kode terkirim', 'Kode cek', 'Bukti transfer', 'Promo (Rp)', 'Verifikasi ambil']
 // an order waits ("hold") until an admin finds the transfer, then gets its pickup code ("process").
 // The Status column keeps words a person reading the Sheet understands.
 const STATUS = { hold: 'menunggu verifikasi', process: 'diproses', done: 'selesai', rejected: 'ditolak' }
@@ -70,7 +75,7 @@ const loose_ = (t) => String(t).toLowerCase().replace(/[^a-z0-9]/g, '')
 // what the customer's phone may know about an order: the pickup code only once it's paid
 function orderPublic_(r) {
   const st = statusOf_(r[8])
-  return { id: String(r[2]), ref: String(r[13] || ''), status: st, code: st === 'process' || st === 'done' ? String(r[1]) : '', total: Number(r[6]) / 1000, name: String(r[3]), at: new Date(r[0]).getTime(), lines: JSON.parse(String(r[9]) || '[]'), proof: !!r[14], promo: Number(r[15]) / 1000 || 0, pay: payOf_(r[10]) }
+  return { id: String(r[2]), ref: String(r[13] || ''), status: st, code: st === 'process' || st === 'done' ? String(r[1]) : '', total: Number(r[6]) / 1000, name: String(r[3]), at: new Date(r[0]).getTime(), lines: JSON.parse(String(r[9]) || '[]'), proof: !!r[14], promo: Number(r[15]) / 1000 || 0, pay: payOf_(r[10]), wa4: digits_(r[4]).slice(-4) }
 }
 // pre-orders are paid by BCA transfer or the GoPay Merchant QRIS
 const payOf_ = (v) => (String(v).toUpperCase() === 'QRIS' ? 'QRIS' : 'BCA')
@@ -83,6 +88,10 @@ function moneyHolders_() {
 // next pickup code: PLT- + a running number, so the cashier only types the digits ("007").
 // It counts every code ever given (older "nama-003" style too), so it never repeats. Being easy to
 // guess, it never unlocks an order lookup — that's the kode cek's job.
+// pickup proof, without sending the secret itself to the pickup screen: a hash the device can check
+// a typed answer against (works offline too); the Sheet checks again when it's handed over
+const normProof_ = (t) => String(t || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+const sha_ = (t) => Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, t, Utilities.Charset.UTF_8).map((b) => ('0' + (b & 255).toString(16)).slice(-2)).join('')
 const nextCode_ = (rows) => 'PLT-' + ('00' + (rows.reduce((m, r) => Math.max(m, Number((String(r[1]).match(/(\d+)$/) || [])[1]) || 0), 0) + 1)).slice(-3)
 
 /* ---- proof of transfer: screenshots go into one Drive folder, renamed after the customer */
@@ -161,9 +170,16 @@ function promoReclaim_(sh, rows, wa) {
 
 
 /* ---- the booth's own sales (/cashier), separate from pre-orders so /hasil and the promo stay as they are */
-const BOOTH_COLS = ['Waktu', 'Kode', 'ID', 'Nama', 'Pesanan', 'Total (Rp)', 'Bayar', 'Status', 'Detail (JSON)', 'Catatan', 'Diambil']
-const BOOTH_STATUS = { process: 'diproses', done: 'selesai', void: 'batal' }
-const boothSheet_ = () => sheet_('Kasir', BOOTH_COLS)
+const BOOTH_COLS = ['Waktu', 'Kode', 'ID', 'Nama', 'Pesanan', 'Total (Rp)', 'Bayar', 'Status', 'Detail (JSON)', 'Catatan', 'Diambil', 'Kode cek', 'Siap']
+// diproses → siap (the barista called it: the receipt page rings) → selesai (handed over)
+const BOOTH_STATUS = { process: 'diproses', ready: 'siap', done: 'selesai', void: 'batal' }
+function boothSheet_() {
+  const sh = sheet_('Kasir', BOOTH_COLS)
+  // columns added later: write their headers into an older sheet
+  if (sh.getLastColumn() < BOOTH_COLS.length) sh.getRange(1, 1, 1, BOOTH_COLS.length).setValues([BOOTH_COLS]).setFontWeight('bold').setBackground('#5a2e1a').setFontColor('#f5ebdd')
+  return sh
+}
+const boothState_ = (v) => ({ diproses: 'process', siap: 'ready', selesai: 'done', batal: 'void' })[String(v)] || 'process'
 const boothRows_ = (sh) => (sh.getLastRow() < 2 ? [] : sh.getRange(2, 1, sh.getLastRow() - 1, BOOTH_COLS.length).getValues())
 
 /* ---- one crew PIN (CREW_PIN) opens every crew page. A wrong one is written to "Keamanan" and answered
@@ -505,7 +521,12 @@ function doPost(e) {
       if (!lines.length) return json_({ ok: false, error: 'empty' })
       const total = lines.reduce((t, l) => t + l.qty * l.price, 0)
       const code = 'B-' + ('00' + (rows.reduce((m, r) => Math.max(m, Number(String(r[1]).replace(/\D/g, '')) || 0), 0) + 1)).slice(-3)
-      sh.appendRow([now, code, clip_(b.id, 64), clip_(b.name, 60), lines.map((l) => l.qty + '× ' + l.name).join(', '), total * 1000, b.pay === 'qris' ? 'QRIS' : b.pay === 'bca' ? 'Transfer BCA' : 'Tunai', BOOTH_STATUS.process, JSON.stringify(lines), clip_(b.note, 200)])
+      const used = rows.map((r) => String(r[11]))
+      let ref = ''
+      do ref = newRef_([]) // same alphabet as the pre-orders' kode cek
+      while (used.indexOf(ref) !== -1)
+      sh.appendRow([now, code, clip_(b.id, 64), clip_(b.name, 60), lines.map((l) => l.qty + '× ' + l.name).join(', '), total * 1000, b.pay === 'qris' ? 'QRIS' : b.pay === 'bca' ? 'Transfer BCA' : 'Tunai', BOOTH_STATUS.process, JSON.stringify(lines), clip_(b.note, 200), '', ref, ''])
+      receiptsChanged_()
       return json_({ ok: true, code: code })
     }
 
@@ -516,6 +537,7 @@ function doPost(e) {
       const i = boothRows_(sh).map((r) => String(r[2])).indexOf(String(b.id))
       if (i === -1) return json_({ ok: false, error: 'id' })
       sh.getRange(i + 2, 8).setValue(BOOTH_STATUS.void)
+      receiptsChanged_()
       return json_({ ok: true })
     }
 
@@ -536,10 +558,11 @@ function doPost(e) {
       if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
       const po = orderRows_(orderSheet_())
         .filter((r) => ['process', 'done'].indexOf(statusOf_(r[8])) !== -1)
-        .map((r) => ({ src: 'po', id: String(r[2]), code: String(r[1]), name: String(r[3]), at: new Date(r[0]).getTime(), total: Number(r[6]) / 1000, pay: payOf_(r[10]), note: String(r[7]), done: statusOf_(r[8]) === 'done', lines: JSON.parse(String(r[9]) || '[]') }))
+        .map((r) => ({ src: 'po', id: String(r[2]), code: String(r[1]), name: String(r[3]), at: new Date(r[0]).getTime(), total: Number(r[6]) / 1000, pay: payOf_(r[10]), note: String(r[7]), done: statusOf_(r[8]) === 'done', lines: JSON.parse(String(r[9]) || '[]'),
+          vref: r[13] ? sha_(String(r[2]) + ':' + normProof_(r[13])) : '', vwa: sha_(String(r[2]) + ':' + digits_(r[4]).slice(-4)), pickedBy: String(r[16] || '') }))
       const booth = boothRows_(boothSheet_())
         .filter((r) => String(r[7]) !== BOOTH_STATUS.void)
-        .map((r) => ({ src: 'booth', id: String(r[2]), code: String(r[1]), name: String(r[3]), at: new Date(r[0]).getTime(), total: Number(r[5]) / 1000, pay: String(r[6]), note: String(r[9]), done: String(r[7]) === BOOTH_STATUS.done, lines: JSON.parse(String(r[8]) || '[]') }))
+        .map((r) => ({ src: 'booth', id: String(r[2]), code: String(r[1]), name: String(r[3]), at: new Date(r[0]).getTime(), total: Number(r[5]) / 1000, pay: String(r[6]), note: String(r[9]), done: String(r[7]) === BOOTH_STATUS.done, ref: String(r[11] || ''), ready: String(r[7]) === BOOTH_STATUS.ready, readyAt: r[12] ? new Date(r[12]).getTime() : 0, lines: JSON.parse(String(r[8]) || '[]') }))
       return json_({ ok: true, orders: po.concat(booth) })
     }
 
@@ -551,13 +574,34 @@ function doPost(e) {
         const rows = boothRows_(sh)
         const i = rows.map((r) => String(r[2])).indexOf(String(b.id))
         if (i === -1 || String(rows[i][7]) === BOOTH_STATUS.void) return json_({ ok: false, error: 'id' })
-        sh.getRange(i + 2, 8).setValue(b.done ? BOOTH_STATUS.done : BOOTH_STATUS.process)
+        if (b.ready) {
+          // called out: the buyer's receipt page rings (handed over already? leave it)
+          if (String(rows[i][7]) !== BOOTH_STATUS.done) sh.getRange(i + 2, 8).setValue(BOOTH_STATUS.ready)
+          sh.getRange(i + 2, 13).setValue(now)
+          receiptsChanged_()
+          return json_({ ok: true })
+        }
+        sh.getRange(i + 2, 8).setValue(b.done ? BOOTH_STATUS.done : rows[i][12] ? BOOTH_STATUS.ready : BOOTH_STATUS.process)
         sh.getRange(i + 2, 11).setValue(b.done ? now : '')
+        receiptsChanged_()
       } else {
         const sh = orderSheet_()
         const rows = orderRows_(sh)
         const i = rows.map((r) => String(r[2])).indexOf(String(b.id))
         if (i === -1 || ['process', 'done'].indexOf(statusOf_(rows[i][8])) === -1) return json_({ ok: false, error: 'id' })
+        if (b.done) {
+          // someone already took it: say when and how, never hand it over twice
+          if (statusOf_(rows[i][8]) === 'done') return json_({ ok: false, error: 'taken', by: String(rows[i][16] || '') })
+          const p = normProof_(b.proof)
+          const ref = normProof_(rows[i][13])
+          let how = ''
+          if (ref && p === ref) how = 'kode cek'
+          else if (p.length === 4 && p === digits_(rows[i][4]).slice(-4)) how = '4 digit WA'
+          else if (b.manual === 'cek nama') how = 'cek nama' // the code is optional — the crew asked the name
+          else if (String(b.manual || '').trim()) how = 'manual: ' + clip_(b.manual, 80).trim()
+          else return json_({ ok: false, error: 'proof' })
+          sh.getRange(i + 2, 17).setValue(how + ' · ' + Utilities.formatDate(now, 'Asia/Jakarta', 'HH.mm'))
+        } else sh.getRange(i + 2, 17).setValue('')
         sh.getRange(i + 2, 9).setValue(b.done ? STATUS.done : STATUS.process)
       }
       return json_({ ok: true })
@@ -600,7 +644,29 @@ function doPost(e) {
   }
 }
 
-function doGet() {
+/* the buyer's receipt: every booth sale by id, built once and shared for 4 s by all the phones asking */
+function receipt_(id) {
+  const cache = CacheService.getScriptCache()
+  let all = cache.get('receipts')
+  if (!all) {
+    const map = {}
+    boothRows_(boothSheet_()).forEach((r) => {
+      map[String(r[2])] = {
+        code: String(r[1]), ref: String(r[11] || ''), name: String(r[3]), at: new Date(r[0]).getTime(), total: Number(r[5]) / 1000, pay: String(r[6]),
+        lines: JSON.parse(String(r[8]) || '[]').map((l) => ({ name: l.name, qty: l.qty, price: l.price })),
+        status: boothState_(r[7]), readyAt: r[12] ? new Date(r[12]).getTime() : 0, doneAt: r[10] ? new Date(r[10]).getTime() : 0,
+      }
+    })
+    all = JSON.stringify(map)
+    if (all.length < 95000) cache.put('receipts', all, 4) // the cache holds 100 KB a value
+  }
+  const r = JSON.parse(all)[id]
+  return ContentService.createTextOutput(JSON.stringify(r ? { ok: true, receipt: r } : { ok: false, error: 'none' })).setMimeType(ContentService.MimeType.JSON)
+}
+const receiptsChanged_ = () => CacheService.getScriptCache().remove('receipts')
+
+function doGet(e) {
+  if (e && e.parameter && e.parameter.r) return receipt_(String(e.parameter.r).slice(0, 64))
   // a crowd of phones polls this — answer from a 10 s cache instead of re-reading the Sheet each time
   const cache = CacheService.getScriptCache()
   const hit = cache.get('stats')

@@ -11,6 +11,7 @@ import { PreorderPage } from './views/PreorderPage'
 import { ConfigPage } from './views/ConfigPage'
 import { CashierPage } from './views/CashierPage'
 import { PickupPage } from './views/PickupPage'
+import { ReceiptPage, SavedReceiptsPage } from './views/ReceiptPage'
 import { TRAP_PATH, TrapPage } from './views/TrapPage'
 import { SystemStatus } from './components/SystemStatus'
 import { ErrorBoundary, ErrorPage, type ErrorKind } from './views/ErrorPage'
@@ -24,6 +25,8 @@ if (short) history.replaceState(null, '', `/preorder?cek=${encodeURIComponent(sh
 // small standalone pages (no booth app around them): the QR's links page, the form, old /go hops
 const path = window.location.pathname.replace(/\/+$/, '')
 const hop = path.match(/^\/go\/(ig|feedback)$/)?.[1] as HopTarget | undefined
+// a booth receipt from the cashier's QR: /r/<sale id>
+const receipt = path.match(/^\/r\/([A-Za-z0-9-]{8,64})$/)?.[1]
 const PAGES: Record<string, () => ReactNode> = {
   '': () => <App />,
   '/link': () => <LinksPage />,
@@ -33,6 +36,7 @@ const PAGES: Record<string, () => ReactNode> = {
   '/config': () => <ConfigPage />,
   '/cashier': () => <CashierPage />,
   '/pickup': () => <PickupPage />,
+  '/struk': () => <SavedReceiptsPage />,
 }
 // dev only: /_error/500 (or 503, offline) previews the other error pages
 const preview = import.meta.env.DEV ? path.match(/^\/_error\/(404|500|503|offline)$/)?.[1] : undefined
@@ -44,7 +48,7 @@ const page = hop ? (
 ) : preview ? (
   <ErrorPage kind={(preview === 'offline' ? 'offline' : Number(preview)) as ErrorKind} />
 ) : (
-  PAGES[path]?.() ?? <ErrorPage kind={404} />
+  receipt ? <ReceiptPage id={receipt} /> : (PAGES[path]?.() ?? <ErrorPage kind={404} />)
 )
 
 // keep the menu working when the venue wifi gives up (production only — dev stays uncached)
