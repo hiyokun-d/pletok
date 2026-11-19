@@ -15,6 +15,12 @@ export const INSTAGRAM_HANDLE = "@pletok._";
 /** admin WhatsApp for pre-order questions, e.g. '6281234567890' — empty shows the placeholder note */
 export const ADMIN_WA = "6285930460492";
 export const ADMIN_NAME = "CALVIN";
+/** +62 859-3046-0492 — how the admin's number is shown */
+export const ADMIN_WA_PRETTY = ADMIN_WA ? `+${ADMIN_WA.slice(0, 2)} ${ADMIN_WA.slice(2, 5)}-${ADMIN_WA.slice(5, 9)}-${ADMIN_WA.slice(9)}` : "";
+/** "Calvin" */
+export const ADMIN_FIRST = ADMIN_NAME ? ADMIN_NAME.charAt(0) + ADMIN_NAME.slice(1).toLowerCase() : "admin";
+/** a WhatsApp chat with the admin, message already typed */
+export const adminChat = (text: string) => `https://wa.me/${ADMIN_WA}?text=${encodeURIComponent(text)}`;
 
 /** The deployed site — the QR codes point here so scans can be counted before forwarding */
 export const SITE_URL = "https://pletok.hiyokun.dev";

@@ -1,7 +1,7 @@
 import { motion } from 'motion/react'
 import { useEffect } from 'react'
 import { ArrowUpRight, Headset, MapPin, MessageCircleHeart, ShoppingBag, UtensilsCrossed } from 'lucide-react'
-import { ADMIN_NAME, ADMIN_WA, EVENT, LINKS } from '../data/event'
+import { ADMIN_FIRST, ADMIN_NAME, ADMIN_WA, ADMIN_WA_PRETTY, EVENT, LINKS, adminChat } from '../data/event'
 import { DRINKS, TAGLINE } from '../data/menu'
 import { logScan } from '../lib/backend'
 import { useFeedbackOpen } from '../hooks/useFeedbackOpen'
@@ -14,11 +14,8 @@ import { spring } from '../lib/motion'
 
 let counted = false
 
-/** 6285930460492 → +62 859-3046-0492 */
-const prettyWa = (wa: string) => `+${wa.slice(0, 2)} ${wa.slice(2, 5)}-${wa.slice(5, 9)}-${wa.slice(9)}`
 // the admin doubles as customer service (same number as on /preorder) — a chat opens with a hello
-const CS_HREF = `https://wa.me/${ADMIN_WA}?text=${encodeURIComponent('Halo Pletok! Aku mau tanya…')}`
-const csName = ADMIN_NAME.charAt(0) + ADMIN_NAME.slice(1).toLowerCase()
+const CS_HREF = adminChat('Halo Pletok! Aku mau tanya…')
 
 const ICONS = { preorder: ShoppingBag, feedback: MessageCircleHeart, instagram: InstagramIcon }
 
@@ -128,7 +125,7 @@ export function LinksPage() {
               <span className="min-w-0 flex-1">
                 <span className="block font-display text-lg font-bold leading-tight">Customer Service</span>
                 <span className="block truncate font-cond text-sm italic text-brown-soft">
-                  WhatsApp {prettyWa(ADMIN_WA)}{ADMIN_NAME && ` · ${csName}`}
+                  WhatsApp {ADMIN_WA_PRETTY}{ADMIN_NAME && ` · ${ADMIN_FIRST}`}
                 </span>
               </span>
               <ArrowUpRight className="size-5 shrink-0 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />

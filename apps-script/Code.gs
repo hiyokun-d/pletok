@@ -15,6 +15,7 @@
  *   POST {type:'wipe', pin, what:['orders','booth','feedback','scans','security','proofs']} → clear test data (backs up first)
  *   POST {type:'pin', pin} → is this the crew PIN (one PIN for /hasil, /config, /cashier, /pickup)
  *   POST {type:'booth-order' | 'booth-void', pin, …} → a walk-in sale in "Kasir" (B-001, B-002…)
+ *   POST {type:'booth-check', pin, ids} → which of the cashier phone's saved sales the Sheet already has
  *   POST {type:'queue', pin} / {type:'pickup', pin, src, id, done} → the pickup counter's list, handed over
  *   POST {type:'trap', path, ua, tries} → someone tried the fake /admin page ("Keamanan" tab)
  *   POST {type:'incident', page, downFor, fails} → a phone couldn't reach us and just got back ("Keamanan" + email)
@@ -516,6 +517,18 @@ function doPost(e) {
       if (i === -1) return json_({ ok: false, error: 'id' })
       sh.getRange(i + 2, 8).setValue(BOOTH_STATUS.void)
       return json_({ ok: true })
+    }
+
+    // /cashier's own log: which of these sales do we already have (and as what)? — cancelled ones
+    // included, so a sale voided here is never sent again as if it were missing
+    if (b.type === 'booth-check') {
+      if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
+      const ids = (Array.isArray(b.ids) ? b.ids : []).slice(0, 1000).map(String)
+      const found = {}
+      boothRows_(boothSheet_()).forEach((r) => {
+        if (ids.indexOf(String(r[2])) !== -1) found[String(r[2])] = { code: String(r[1]), status: String(r[7]) }
+      })
+      return json_({ ok: true, found: found })
     }
 
     // /pickup + /cashier: everything that's paid — verified pre-orders and booth sales

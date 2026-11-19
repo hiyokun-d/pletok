@@ -1,12 +1,13 @@
 import { AnimatePresence, motion, useAnimate } from 'motion/react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Banknote, Check, Copy, Gift, Landmark, Loader2, Minus, Plus, QrCode, ReceiptText, RotateCcw, ShoppingBasket, TriangleAlert, X } from 'lucide-react'
-import { BACKEND, crewPin, enqueue, fetchQueue, sendBoothOrder, voidBoothOrder, type BoothLine, type BoothPay, type QueueOrder } from '../lib/backend'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { Banknote, Check, CloudOff, Copy, Download, Gift, HardDrive, RefreshCw, Landmark, Loader2, Minus, Plus, QrCode, ReceiptText, RotateCcw, ShoppingBasket, TriangleAlert, X } from 'lucide-react'
+import { BACKEND, crewPin, fetchQueue, sendBoothOrder, voidBoothOrder, type BoothLine, type BoothPay, type QueueOrder } from '../lib/backend'
 import { usePreorder } from '../hooks/usePreorder'
 import { useMenu } from '../hooks/useMenu'
 import { rupiah } from '../data/preorder'
 import { ParticleField } from '../components/ParticleField'
 import { QrisCode } from '../components/QrisCode'
+import { downloadLedger, ledger, markSent, markVoid, onLedger, reconcile, record, sync, type Reconciled } from '../lib/boothLedger'
 import { Card, CrewNav, Empty, PinGate, Shell, hhmm, useCrewPage } from './adminUi'
 
 /*
@@ -140,17 +141,19 @@ export function CashierPage() {
     setSending(true)
     setError(null)
     const order: BoothLine[] = lines.map((i) => ({ id: i.key, name: i.name, qty: i.qty, price: i.price, drinks: i.drinks }))
+    // on this phone first — whatever the Sheet does next, the sale exists
+    record({ id: orderId, at: Date.now(), lines: order, pay, name: name.trim(), total })
     const r = await sendBoothOrder(pin, { id: orderId, lines: order, pay, name: name.trim(), note: '' })
     setSending(false)
     if (r === 'pin') return setPin(null), setWrong(true)
-    // Plan B: the Sheet didn't answer — the sale waits in this phone's outbox and goes in by itself
-    // when it's back (same id → the Sheet never counts it twice). The buyer still gets served now.
+    // Plan B: the Sheet didn't answer — the sale stays "pending" in this phone's log and goes in by
+    // itself when it's back (same id → the Sheet never counts it twice). The buyer still gets served now.
     if (!r) {
-      void enqueue({ type: 'booth-order', pin, id: orderId, lines: order, pay, name: name.trim(), note: '' })
       setDone({ code: '#' + orderId.slice(0, 4).toUpperCase(), name: name.trim(), at: Date.now(), queued: true })
       reset()
       return
     }
+    markSent(orderId, r)
     setDone({ code: r, name: name.trim(), at: Date.now() })
     reset()
     void loadHistory()
@@ -404,6 +407,7 @@ export function CashierPage() {
         </section>
       </div>
 
+      <LocalLog pin={pin} onSynced={loadHistory} />
       <History orders={history} pin={pin} total={{ tunai: sum('tunai'), qris: sum('qris'), bca: sum('transfer bca'), n: sold.length }} onChange={loadHistory} />
 
       {/* the number to call out, big */}
@@ -603,7 +607,7 @@ function History({ orders, pin, total, onChange }: { orders: QueueOrder[] | null
                   onClick={async () => {
                     if (arm !== o.id) return setArm(o.id)
                     setBusy(o.id)
-                    await voidBoothOrder(pin, o.id)
+                    if (await voidBoothOrder(pin, o.id)) markVoid(o.id)
                     setBusy(null)
                     setArm(null)
                     onChange()
@@ -619,5 +623,68 @@ function History({ orders, pin, total, onChange }: { orders: QueueOrder[] | null
         </ul>
       )}
     </Card>
+  )
+}
+
+/**
+ * This phone's own log of sales (lib/boothLedger): how many the Sheet has, what's still only here,
+ * and "Cek ulang" — asks the Sheet which sales it really has and re-sends only the missing ones.
+ * Pending sales also go out by themselves every 20 s and the moment the Sheet is back.
+ */
+function LocalLog({ pin, onSynced }: { pin: string; onSynced: () => void }) {
+  const sales = useSyncExternalStore(onLedger, ledger)
+  const [checking, setChecking] = useState(false)
+  const [result, setResult] = useState<Reconciled | 'fail' | null>(null)
+  const pending = sales.filter((s) => s.state === 'pending')
+  const inSheet = sales.filter((s) => s.state === 'sent').length
+  useEffect(() => {
+    if (!pending.length) return
+    const go = () => void sync(pin).then((n) => typeof n === 'number' && n > 0 && onSynced())
+    go()
+    const t = window.setInterval(go, 20_000)
+    window.addEventListener('pletok:recovered', go)
+    window.addEventListener('online', go)
+    return () => {
+      window.clearInterval(t)
+      window.removeEventListener('pletok:recovered', go)
+      window.removeEventListener('online', go)
+    }
+  }, [pending.length, pin, onSynced])
+  if (!sales.length) return null
+
+  const check = async () => {
+    setChecking(true)
+    const r = await reconcile(pin)
+    setChecking(false)
+    setResult(r && r !== 'pin' ? r : 'fail')
+    if (r && r !== 'pin') onSynced()
+  }
+  return (
+    <div className={`mt-8 rounded-3xl border-2 p-4 ${pending.length ? 'border-[#e8b53a] bg-[#e8b53a]/15' : 'border-brown/10 bg-cream/70'}`}>
+      <div className="flex flex-wrap items-center gap-3">
+        <span className={`grid size-10 shrink-0 place-items-center rounded-2xl ${pending.length ? 'bg-[#e8b53a] text-brown' : 'bg-leaf text-cream'}`}>
+          {pending.length ? <CloudOff className="size-5 animate-pulse" /> : <HardDrive className="size-5" />}
+        </span>
+        <div className="min-w-0 flex-1 font-display">
+          <p className="font-bold leading-tight">Catatan kasir di HP ini</p>
+          <p className="font-cond text-sm italic text-brown-soft">
+            {sales.length} penjualan · {inSheet} sudah di Sheet{pending.length > 0 && <b className="not-italic text-terracotta"> · {pending.length} belum — dikirim otomatis</b>}
+          </p>
+        </div>
+        <button type="button" onClick={() => void check()} disabled={checking} className="inline-flex items-center gap-1.5 rounded-full bg-brown px-3.5 py-2 font-display text-sm font-semibold text-cream disabled:opacity-60">
+          {checking ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />} Cek ulang dengan Sheet
+        </button>
+        <button type="button" onClick={downloadLedger} aria-label="Unduh catatan HP ini (CSV)" className="grid size-9 place-items-center rounded-full border-2 border-brown/15">
+          <Download className="size-4" />
+        </button>
+      </div>
+      {result && (
+        <p className={`mt-3 rounded-2xl px-3 py-2 font-display text-sm ${result === 'fail' ? 'bg-terracotta/10 text-terracotta' : result.left ? 'bg-[#e8b53a]/30' : 'bg-leaf/15 text-leaf'}`}>
+          {result === 'fail'
+            ? 'Sheet belum bisa dihubungi — catatan tetap aman di HP ini, coba lagi sebentar.'
+            : `Dicek ${hhmm(result.at)}: ${result.matched} cocok dengan Sheet${result.resent ? ` · ${result.resent} yang belum masuk sudah dikirim` : ''}${result.left ? ` · ${result.left} masih menunggu` : result.resent ? '' : ' · tidak ada yang dobel / hilang'}`}
+        </p>
+      )}
+    </div>
   )
 }

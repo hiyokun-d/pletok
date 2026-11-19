@@ -537,6 +537,12 @@ export async function sendBoothOrder(pin: string, order: { id: string; lines: Bo
   return r?.ok ? r.code : r?.error === 'pin' ? ('pin' as const) : null
 }
 
+/** which of these booth sales the Sheet already has: id → its code and status (diproses / selesai / batal) */
+export async function checkBoothOrders(pin: string, ids: string[]) {
+  const r = await postJson<{ found: Record<string, { code: string; status: string }> }>({ type: 'booth-check', pin, ids }, 2)
+  return r?.ok ? r.found : r?.error === 'pin' ? ('pin' as const) : null
+}
+
 export async function voidBoothOrder(pin: string, id: string) {
   return !!(await postJson({ type: 'booth-void', pin, id }, 2))?.ok
 }

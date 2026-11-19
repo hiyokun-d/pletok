@@ -1,9 +1,9 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent } from 'react'
 import { ArrowLeft, ArrowRight, Ban, Check, CloudOff, Send, Gift, CheckCircle2, ChevronDown, Copy, Hourglass, ImageUp, KeyRound, Landmark, Loader2, MapPin, MessageCircle, Phone, QrCode, RefreshCw, Search, ShieldAlert, XCircle } from 'lucide-react'
-import { ADMIN_NAME, ADMIN_WA, EVENT } from '../data/event'
+import { ADMIN_FIRST, ADMIN_NAME, ADMIN_WA, ADMIN_WA_PRETTY, EVENT, adminChat } from '../data/event'
 import { rupiah } from '../data/preorder'
-import { FINAL_PREORDER_ERRORS, findOrders, lookupOrders, setPreorderPay, submitPreorder, uploadProof, type OrderStatus, type PreorderConfig, type PreorderPay, type Promo, type PublicOrder } from '../lib/backend'
+import { FINAL_PREORDER_ERRORS, findOrders, health, onHealth, lookupOrders, setPreorderPay, submitPreorder, uploadProof, type OrderStatus, type PreorderConfig, type PreorderPay, type Promo, type PublicOrder } from '../lib/backend'
 import { spring } from '../lib/motion'
 import { ParticleField } from './ParticleField'
 import { QrisCode } from './QrisCode'
@@ -600,6 +600,8 @@ function AutoCheck({ at }: { at?: number }) {
  */
 export function OrderTracker({ order, config, onBack, onProof, checkedAt, onRetry, triedAt }: { order: MyOrder; config: PreorderConfig; onBack: () => void; onProof: () => void; checkedAt?: number; onRetry?: () => void; triedAt?: number }) {
   const bca = config.bca ?? { number: '', holder: '' }
+  // the Sheet isn't answering → no payment details on screen (we couldn't confirm it anyway)
+  const down = useSyncExternalStore(onHealth, health).down
   // the Sheet hears which one they picked, so the crew knows where to look for the money
   const [pay, setPay] = useState<PreorderPay>(order.pay ?? 'BCA')
   const pick = (p: PreorderPay) => {
@@ -657,13 +659,13 @@ export function OrderTracker({ order, config, onBack, onProof, checkedAt, onRetr
           <motion.div key="rejected" className="mt-4 flex max-w-sm flex-col items-center" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
             <h1 className="font-display text-3xl font-bold">Transfernya belum ketemu</h1>
             <p className="mt-2 font-display text-lg text-brown-soft">Tim kami belum menemukan pembayaran untuk pesanan ini. Sudah transfer? Upload bukti transfernya — kami cek ulang.</p>
-            <ProofUpload order={order} onDone={onProof} />
+            {down ? <AdminProof order={order} /> : <ProofUpload order={order} onDone={onProof} />}
             <AdminContact className="mt-4 text-left" />
           </motion.div>
         ) : (
           <motion.div key="pay" className="flex w-full flex-col items-center" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, filter: 'blur(8px)' }}>
-            <h1 className="mt-4 font-display text-3xl font-bold">Tinggal bayar</h1>
-            <p className="mt-1 max-w-sm font-display text-brown-soft">Bayar persis sejumlah ini lewat transfer BCA atau QRIS, lalu tunggu sebentar — kode ambilmu muncul di sini setelah kami cek.</p>
+            <h1 className="mt-4 font-display text-3xl font-bold">{down ? 'Pesananmu sudah masuk' : 'Tinggal bayar'}</h1>
+            <p className="mt-1 max-w-sm font-display text-brown-soft">{down ? 'Tinggal bayar — tapi tunggu sistem kami pulih dulu ya, cara bayarnya muncul lagi di sini.' : 'Bayar persis sejumlah ini lewat transfer BCA atau QRIS, lalu tunggu sebentar — kode ambilmu muncul di sini setelah kami cek.'}</p>
             {!!order.promo && (
               <motion.p
                 className="mt-3 inline-flex items-center gap-2 rounded-full bg-leaf px-4 py-1.5 font-display text-sm font-semibold text-cream shadow-[0_4px_0_#3f5426]"
@@ -689,6 +691,10 @@ export function OrderTracker({ order, config, onBack, onProof, checkedAt, onRetr
               </div>
             </div>
 
+            {down ? (
+              <PaymentPaused order={order} />
+            ) : (
+              <>
             <div className="mt-3 grid w-full max-w-sm grid-cols-2 gap-1 rounded-2xl bg-brown/10 p-1">
               {(['BCA', 'QRIS'] as const).map((p) => (
                 <button key={p} type="button" onClick={() => pick(p)} aria-pressed={pay === p} className="relative flex items-center justify-center gap-2 rounded-xl py-2.5 font-display font-semibold">
@@ -729,7 +735,9 @@ export function OrderTracker({ order, config, onBack, onProof, checkedAt, onRetr
               )}
             </AnimatePresence>
 
-            <ProofUpload order={order} onDone={onProof} />
+                <ProofUpload order={order} onDone={onProof} />
+              </>
+            )}
             <NoScam />
             <NoRefund className="mt-3 w-full max-w-sm" />
 
@@ -843,11 +851,13 @@ function QueuedOrder({ order, onBack, onRetry, triedAt }: { order: MyOrder; onBa
           <Send className="size-5 shrink-0" />
           <span className="min-w-0 flex-1 font-display leading-tight">
             <b className="block">{failed ? 'Chat admin soal pesanan ini' : 'Nggak mau nunggu? Kirim ke admin'}</b>
-            <span className="text-sm text-cream/80">Pesananmu langsung tersusun di WhatsApp · {ADMIN_NAME ? ADMIN_NAME.charAt(0) + ADMIN_NAME.slice(1).toLowerCase() : 'admin'}</span>
+            <span className="text-sm text-cream/80">Pesananmu langsung tersusun di WhatsApp · {ADMIN_FIRST}</span>
           </span>
           <ArrowRight className="size-5 shrink-0" />
         </a>
       )}
+
+      {!failed && <AdminProof order={order} quiet />}
 
       <div className="mt-6 w-full max-w-sm rounded-3xl border-2 border-brown/10 bg-cream/80 p-4 text-left">
         {order.lines.map((i) => (
@@ -866,5 +876,61 @@ function QueuedOrder({ order, onBack, onRetry, triedAt }: { order: MyOrder; onBa
         <MapPin className="size-4" /> Ambil di {EVENT.table} · {EVENT.dateLabel}, {EVENT.timeLabel}
       </p>
     </div>
+  )
+}
+
+/** "I already paid": the proof goes to the admin on WhatsApp (the upload needs the Sheet) */
+const proofMessage = (o: MyOrder) =>
+  adminChat(
+    [
+      'Halo admin Pletok! Aku sudah bayar pre-order, ini bukti bayarnya (screenshot terlampir):',
+      `> Atas nama: ${o.name}`,
+      ...(o.ref ? [`> Kode cek: ${o.ref}`] : [`> ID pesanan: ${o.id.slice(0, 8)}`]),
+      `> Pesanan: ${o.lines.map((l) => `${l.qty}x ${l.name}`).join(', ')}`,
+      `> Total: ${rupiah(o.total)}`,
+      `> Bayar via: ${o.pay ?? 'BCA / QRIS'}`,
+    ].join('\n'),
+  )
+
+/** the admin's number, written out — people copy it, screenshot it, save it */
+function AdminProof({ order, quiet = false }: { order: MyOrder; quiet?: boolean }) {
+  if (!ADMIN_WA) return null
+  return (
+    <a
+      href={proofMessage(order)}
+      target="_blank"
+      rel="noreferrer"
+      data-track="proof-to-admin"
+      className={`mt-3 flex w-full max-w-sm items-center gap-3 rounded-3xl p-4 text-left ${quiet ? 'border-2 border-brown/15 bg-cream' : 'bg-leaf text-cream shadow-[0_4px_0_#3f5426]'}`}
+    >
+      <ImageUp className="size-5 shrink-0" />
+      <span className="min-w-0 flex-1 font-display leading-tight">
+        <b className="block">{quiet ? 'Terlanjur bayar? Kirim buktinya ke admin' : 'Sudah bayar? Kirim bukti ke admin'}</b>
+        <span className={`text-sm ${quiet ? 'text-brown-soft' : 'text-cream/85'}`}>
+          WhatsApp {ADMIN_WA_PRETTY} · {ADMIN_FIRST} — lampirkan screenshot-nya
+        </span>
+      </span>
+      <ArrowRight className="size-5 shrink-0" />
+    </a>
+  )
+}
+
+/**
+ * The Sheet is down: no account number, no QRIS — a payment we can't match to the order is a
+ * payment that can go missing. The order itself is safe; the details come back on their own.
+ */
+function PaymentPaused({ order }: { order: MyOrder }) {
+  return (
+    <>
+      <div className="mt-3 w-full max-w-sm rounded-3xl border-2 border-dashed border-[#e8b53a] bg-[#e8b53a]/15 p-5 text-left">
+        <p className="flex items-center gap-2 font-display font-bold">
+          <CloudOff className="size-5 animate-pulse text-terracotta" /> Pembayaran ditahan sebentar
+        </p>
+        <p className="mt-1.5 font-display text-sm text-brown-soft">
+          Sistem kami lagi gangguan, jadi cara bayar kami sembunyikan dulu — biar pembayaranmu nggak terlewat. Pesananmu aman; cara bayar muncul lagi di sini sendiri begitu sistem pulih.
+        </p>
+      </div>
+      <AdminProof order={order} />
+    </>
   )
 }
