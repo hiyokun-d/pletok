@@ -25,9 +25,13 @@ interface MenuState {
   closedAt?: number
   /** /config "Putar A+G": when the booth screen should play the attention show (epoch ms) */
   attnAt?: number
+  /** /config "Tema layar": the look of the menu screen, /cashier and /link */
+  theme?: ThemeId
   /** last change, to tell the newer copy apart when syncing */
   at?: number
 }
+
+export type ThemeId = 'classic' | 'sunset'
 
 export interface LiveDrink extends Drink {
   soldOut: boolean
@@ -47,6 +51,7 @@ export interface LiveMenu {
   anySoldOut: boolean
   closedEarly: boolean
   attnAt?: number
+  theme: ThemeId
 }
 
 const KEY = 'pletok:menu'
@@ -117,7 +122,7 @@ function derive(s: MenuState): LiveMenu {
     return { ...b, items, price: price(b.name, b.price), normal, detail: edited ? describe(items) : b.detail, soldOut: !!reason, reason, edited }
   })
   const allSoldOut = drinks.every((d) => d.soldOut)
-  return { drinks, bundles, allSoldOut, anySoldOut: drinks.some((d) => d.soldOut) || bundles.some((b) => b.soldOut), closedEarly: !!s.closedAt, attnAt: s.attnAt }
+  return { drinks, bundles, allSoldOut, anySoldOut: drinks.some((d) => d.soldOut) || bundles.some((b) => b.soldOut), closedEarly: !!s.closedAt, attnAt: s.attnAt, theme: s.theme ?? 'classic' }
 }
 
 // set up after the helpers above — derive() needs describe() when a saved bundle was edited
@@ -187,6 +192,11 @@ export function setBundleForced(name: string, forced: boolean) {
 /** everything's gone → close the booth now instead of waiting for 16:00 (undo: `false`) */
 export function setClosedEarly(closed: boolean) {
   commit({ ...state, closedAt: closed ? Date.now() : undefined })
+}
+
+/** the look of the customer-facing screens, for every device */
+export function setTheme(theme: ThemeId) {
+  commit({ ...state, theme })
 }
 
 /** A+G from a phone: the booth plays the attention show `delayMs` from now (null = cancel) */

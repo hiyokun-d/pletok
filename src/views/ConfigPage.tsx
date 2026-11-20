@@ -1,12 +1,12 @@
 import { motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
-import { Ban, Check, DoorClosed, Gift, Megaphone, X, Landmark, Loader2, PackageCheck, RotateCcw, ShieldCheck, ShoppingBag, Trash2, UtensilsCrossed } from 'lucide-react'
+import { Ban, Check, Palette, DoorClosed, Gift, Megaphone, X, Landmark, Loader2, PackageCheck, RotateCcw, ShieldCheck, ShoppingBag, Trash2, UtensilsCrossed } from 'lucide-react'
 import { EVENT } from '../data/event'
 import { BUNDLES, DRINKS, type DrinkId } from '../data/menu'
 import { DEFAULT_CUTOFF, DEFAULT_PREORDER, PREORDER_ITEMS } from '../data/preorder'
 import { BACKEND, crewPin, savePreorderConfig, setFeedbackModeRemote, wipeData, type PreorderConfig, type Promo, type WipeTarget } from '../lib/backend'
 import { usePreorder } from '../hooks/usePreorder'
-import { resetMenu, scheduleAttention, setBundleForced, setBundleItems, setClosedEarly, setDrinkSold, setMenuPrice, useMenu, useMenuSync } from '../hooks/useMenu'
+import { resetMenu, scheduleAttention, setTheme, type ThemeId, setBundleForced, setBundleItems, setClosedEarly, setDrinkSold, setMenuPrice, useMenu, useMenuSync } from '../hooks/useMenu'
 import { useEventPhase } from '../hooks/useEventPhase'
 import { useFeedbackOpen, type FeedbackMode } from '../hooks/useFeedbackOpen'
 import { spring } from '../lib/motion'
@@ -37,6 +37,7 @@ export function ConfigPage() {
       </header>
 
       <MenuAdmin />
+      <ThemePicker />
       <AttentionRemote />
       <AdminPanel demo={DEMO} save={(m) => (DEMO ? wait(1200).then(() => true) : setFeedbackModeRemote(pin, m))} />
       <PreorderAdmin
@@ -531,6 +532,75 @@ function PreorderAdmin({ remote, loaded, save, promoUsed }: { remote: PreorderCo
 const ATTN_DELAYS = [15, 30, 60]
 
 /** the booth screen's attention show, started from here — a delay so the screen has the order in time */
+/* ------------------------------------------------------------------ theme */
+
+const THEMES: Array<{ id: ThemeId; name: string; hint: string; preview: string }> = [
+  { id: 'classic', name: 'Klasik Pletok', hint: 'Krem & cokelat, kertas poster', preview: 'linear-gradient(160deg, #f5ebdd 0%, #ecdcc5 55%, #a8572a 100%)' },
+  {
+    id: 'sunset',
+    name: 'Neon Sunset',
+    hint: 'Warna Pletok tetap — cahaya senja dari atas + bayangan daun palem yang bergoyang',
+    preview: 'radial-gradient(60% 90% at 15% 0%, #ff4f9a99, transparent 70%), radial-gradient(55% 90% at 55% 0%, #ffa24a99, transparent 70%), radial-gradient(50% 90% at 92% 0%, #9b5cff88, transparent 72%), #f5ebdd',
+  },
+]
+
+/** the look of the screens customers see — the booth laptop, the cashier and /link follow within ~30 s */
+function ThemePicker() {
+  const menu = useMenu()
+  const sync = useMenuSync()
+  const saving = sync.pending && (sync.remote?.theme ?? 'classic') !== menu.theme
+  return (
+    <Card
+      className="mt-6"
+      title={
+        <span className="flex flex-wrap items-center gap-2">
+          <Palette className="size-5 text-terracotta" /> Tema layar
+          {saving && <span className="rounded-full px-2.5 py-0.5 font-cond text-sm font-semibold italic text-brown" style={{ background: WAIT }}>menyimpan…</span>}
+        </span>
+      }
+      meta="Menu booth · /cashier · /link — layar crew lain tetap klasik"
+    >
+      <div className="grid gap-3 sm:grid-cols-2">
+        {THEMES.map((t) => {
+          const on = menu.theme === t.id
+          return (
+            <motion.button
+              key={t.id}
+              type="button"
+              whileTap={{ scale: 0.97 }}
+              onClick={() => setTheme(t.id)}
+              aria-pressed={on}
+              className={`overflow-hidden rounded-3xl border-2 text-left ${on ? 'border-terracotta' : 'border-brown/10'}`}
+              style={on && saving ? { boxShadow: `inset 0 0 0 2px ${WAIT}` } : undefined}
+            >
+              <span className="relative block h-24" style={{ background: t.preview }}>
+                {t.id === 'sunset' && (
+                  <span className="absolute -right-3 -top-4 text-6xl opacity-30 grayscale" style={{ transform: 'rotate(200deg)' }}>🌴</span>
+                )}
+                {on && (
+                  <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-terracotta px-2.5 py-1 font-display text-xs font-semibold text-cream">
+                    <Check className="size-3.5" /> Dipakai
+                  </span>
+                )}
+              </span>
+              <span className="block p-3">
+                <span className="block font-display text-lg font-bold">{t.name}</span>
+                <span className="block font-cond text-sm italic text-brown-soft">{t.hint}</span>
+              </span>
+            </motion.button>
+          )
+        })}
+      </div>
+      <p className="mt-3 font-cond text-sm italic text-brown-soft">
+        Coba dulu:{' '}
+        <a href="/" target="_blank" rel="noreferrer" className="underline">menu</a> ·{' '}
+        <a href="/link" target="_blank" rel="noreferrer" className="underline">/link</a> ·{' '}
+        <a href="/cashier" target="_blank" rel="noreferrer" className="underline">/cashier</a>
+      </p>
+    </Card>
+  )
+}
+
 function AttentionRemote() {
   const { attnAt } = useMenu()
   const sync = useMenuSync()

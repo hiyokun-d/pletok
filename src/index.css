@@ -94,3 +94,149 @@ body {
 #root {
   min-height: 100dvh;
 }
+
+/* ------------------------------------------------------------------ Neon Sunset theme
+ * Picked on /config; components/SunsetTheme.tsx sets data-theme on <html> for the menu, /cashier
+ * and /link and draws the light + palms. The palette goes to dusk: deep plum ground, warm cream
+ * text, sunset coral and teal accents — dark enough for the light to glow. cream ⇄ brown swap
+ * roles, so "dark on light" stays readable as "light on dark" without touching a component. */
+:root[data-theme="sunset"] {
+  color-scheme: dark;
+  --color-cream: #170d1c;
+  --color-cream-deep: #251628;
+  --color-brown: #f7e9da;
+  --color-brown-soft: #d2b09d;
+  --color-terracotta: #ff7a59;
+  --color-leaf: #3fd0b6;
+  --color-leaf-light: #8fe8d6;
+  --color-lychee: #ff6f9c;
+  --color-yakult: #ffcf87;
+  --color-spice: #ffab4c;
+}
+:root[data-theme="sunset"] body {
+  background: #170d1c;
+}
+/* the page is see-through: the sky, sun and palms stand behind it */
+:root[data-theme="sunset"] .paper {
+  background: transparent;
+}
+/* …except full-screen overlays (intro, easter egg), which must still cover what's under them */
+:root[data-theme="sunset"] .paper.fixed.z-50 {
+  background: #170d1c;
+}
+/* cards with a fixed light fill (solid on purpose — see DesktopKiosk) */
+:root[data-theme="sunset"] :is(.bg-\[\#f7efe4\], .bg-\[\#fbf5ec\]) {
+  background-color: #21132a;
+  border-color: rgb(255 122 89 / 0.22);
+}
+/* the logo's brown is baked into its paths */
+:root[data-theme="sunset"] path[fill="#6a371c"] {
+  fill: #f7e9da;
+}
+/* the logo as a picture (/link): brown pixels → cream */
+:root[data-theme="sunset"] .pletok-logo {
+  filter: brightness(0) invert(0.94) sepia(0.22) drop-shadow(0 3px 10px rgb(10 4 14 / 0.6)) drop-shadow(0 0 18px rgb(255 140 90 / 0.35));
+}
+/* a dark halo + warm glow so the wordmark holds its own against the sun's beams */
+:root[data-theme="sunset"] svg.mark,
+:root[data-theme="sunset"] .tagline {
+  filter: drop-shadow(0 3px 10px rgb(10 4 14 / 0.6)) drop-shadow(0 0 18px rgb(255 140 90 / 0.35));
+}
+:root[data-theme="sunset"] ::selection {
+  background: #ff7a59;
+  color: #170d1c;
+}
+
+/* the sky behind everything: deep dusk, warm where the sun sits (top-right), cooler at the edges */
+.sunset-sky {
+  background:
+    radial-gradient(90% 70% at 74% 0%, #6b2148 0%, transparent 70%),
+    radial-gradient(60% 60% at 10% 10%, #3a1650 0%, transparent 70%),
+    linear-gradient(180deg, #2a1235 0%, #1b0d22 45%, #120914 100%);
+  animation: sunset-drift 14s ease-in-out infinite alternate;
+}
+.sunset-light {
+  mix-blend-mode: screen;
+}
+/* backlit trees at the edges, leaning out of frame; fainter on a phone where they'd cover text */
+.sunset-tree {
+  bottom: -3vh;
+  height: 104vh;
+  aspect-ratio: 1 / 2;
+  /* the sun's glow wrapping round the silhouette */
+  filter: drop-shadow(0 0 14px rgb(255 140 90 / 0.35));
+}
+.sunset-tree-left {
+  left: -7vh;
+}
+.sunset-tree-right {
+  right: -9vh;
+  height: 112vh;
+  transform: scaleX(-1);
+}
+@media (max-width: 640px) {
+  .sunset-tree {
+    opacity: 0.55;
+    height: 78vh;
+  }
+  .sunset-tree-left {
+    left: -14vh;
+  }
+  .sunset-tree-right {
+    right: -16vh;
+    height: 84vh;
+  }
+}
+/* /cashier: smaller trees pushed to the edges, see-through, so they never sit on the till */
+.sunset-calm .sunset-tree {
+  height: 70vh;
+  opacity: 0.45;
+}
+.sunset-calm .sunset-tree-left {
+  left: -16vh;
+}
+.sunset-calm .sunset-tree-right {
+  right: -18vh;
+  height: 76vh;
+}
+/* film grain: the cinematic finish */
+.sunset-grain {
+  opacity: 0.07;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation: sunset-grain 0.9s steps(4) infinite;
+}
+.sunset-sway {
+  animation: sunset-sway 6s ease-in-out infinite alternate;
+}
+@keyframes sunset-drift {
+  to {
+    filter: hue-rotate(-10deg) saturate(1.2);
+  }
+}
+@keyframes sunset-grain {
+  25% {
+    transform: translate(-3%, 2%);
+  }
+  50% {
+    transform: translate(2%, -3%);
+  }
+  75% {
+    transform: translate(-2%, -1%);
+  }
+}
+@keyframes sunset-sway {
+  from {
+    transform: rotate(-0.8deg);
+  }
+  to {
+    transform: rotate(1deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sunset-sky,
+  .sunset-grain,
+  .sunset-sway {
+    animation: none;
+  }
+}

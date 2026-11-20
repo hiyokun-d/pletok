@@ -44,7 +44,7 @@ export function LinksPage() {
     <main className="paper relative min-h-dvh overflow-hidden px-5 pb-12 pt-10 text-brown">
       <WindLeaves count={10} opacity={0.5} />
       <div className="relative mx-auto flex max-w-md flex-col items-center">
-        <motion.img src={logo} alt="Pletok" className="w-52" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={spring.pop} />
+        <motion.img src={logo} alt="Pletok" className="pletok-logo w-52" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={spring.pop} />
         <p className="mt-2 font-script text-2xl text-terracotta">{TAGLINE}</p>
         <p className="mt-1 flex items-center gap-1.5 font-cond text-base italic text-brown-soft">
           <MapPin className="size-4" /> {EVENT.table} · {EVENT.place}, {EVENT.campus}

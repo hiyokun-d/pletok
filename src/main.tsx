@@ -14,6 +14,7 @@ import { PickupPage } from './views/PickupPage'
 import { ReceiptPage, SavedReceiptsPage } from './views/ReceiptPage'
 import { TRAP_PATH, TrapPage } from './views/TrapPage'
 import { SystemStatus } from './components/SystemStatus'
+import { ThemeHost } from './components/SunsetTheme'
 import { ErrorBoundary, ErrorPage, type ErrorKind } from './views/ErrorPage'
 import { beforeSend, installClickTracking, trackSource } from './lib/analytics'
 import './index.css'
@@ -64,6 +65,8 @@ if (!hop) {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>{page}</ErrorBoundary>
+    {/* the look picked on /config (menu, /cashier, /link) */}
+    {!hop && <ThemeHost />}
     {/* offline / Sheet down / back again — the booth app has its own island for this */}
     {!hop && path !== '' && <SystemStatus />}
     {/* free Vercel Web Analytics + Speed Insights (only report on the deployed site, not localhost) */}
