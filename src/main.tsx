@@ -7,6 +7,7 @@ import { TRAP_PATH, TrapPage } from './views/TrapPage'
 import { SystemStatus } from './components/SystemStatus'
 import { CrewRouter } from './components/CrewRouter'
 import { ThemeHost } from './components/SunsetTheme'
+import { UpdatePill, watchUpdates } from './components/UpdatePill'
 import { ErrorBoundary, ErrorPage, type ErrorKind } from './views/ErrorPage'
 import { beforeSend, installClickTracking, trackSource } from './lib/analytics'
 import './index.css'
@@ -60,7 +61,8 @@ const load = async (): Promise<ReactNode> =>
 
 // keep the menu working when the venue wifi gives up (production only — dev stays uncached)
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
-  window.addEventListener('load', () => void navigator.serviceWorker.register('/sw.js').catch(() => {}))
+  // and tell long-open pages (crew tabs) when a new deploy is ready
+  window.addEventListener('load', () => void navigator.serviceWorker.register('/sw.js').then(watchUpdates).catch(() => {}))
 }
 
 if (!hop) {
@@ -91,6 +93,8 @@ createRoot(document.getElementById('root')!).render(
     {!hop && <ThemeHost />}
     {/* offline / Sheet down / back again — the booth app has its own island for this */}
     {!hop && path !== '' && <SystemStatus />}
+    {/* a new deploy while this page is open → "muat ulang" (not on the menu: it has its dock there) */}
+    {!hop && path !== '' && <UpdatePill />}
     {/* free Vercel Web Analytics + Speed Insights (only report on the deployed site, not localhost) */}
     <Analytics beforeSend={beforeSend} />
     {!hop && <SpeedInsights />}
