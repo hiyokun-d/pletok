@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { Bell, BellOff, BellRing, Check, CloudOff, CupSoda, Focus, HandPlatter, KeyRound, LayoutGrid, Loader2, RotateCcw, ScanLine, Search, ShieldAlert, ShieldCheck, StickyNote, UserRoundCheck, WifiOff } from 'lucide-react'
 import { BACKEND, crewPin, warm, enqueue, fetchQueue, findOrders, markPickedUp, markReady, pickUpPreorder, proofMatches, type QueueOrder } from '../lib/backend'
 import { cachedQueue, forgetSales, localSales, marks, onCrewLocal, saveQueue, setMark, settleMarks } from '../lib/crewLocal'
-import { ScanStruk, preorderRef } from '../components/ScanStruk'
+import { ScanStruk } from '../components/ScanStruk'
 import { PREORDER_ITEMS } from '../data/preorder'
 import { DRINKS } from '../data/menu'
 import { CrewNav, Empty, PinGate, Shell, hhmm, useCrewPage } from './adminUi'
@@ -216,20 +216,6 @@ export function PickupPage() {
       setQ((orders ?? []).find((o) => o.id === id)?.code ?? code)
     }
   }
-  // the phone's own Camera app read a pickup QR → the customer page sent us here: /pickup?ambil=KODE
-  const ambil = useRef(new URLSearchParams(location.search).get('ambil'))
-  useEffect(() => {
-    const ref = ambil.current && preorderRef(`/c/${ambil.current}`)
-    if (!ref || !pin || !orders) return
-    ambil.current = null
-    history.replaceState(null, '', location.pathname)
-    void byRef(ref).then((o) => {
-      if (!o) return setAlert(`Pre-order dengan kode ${ref} belum ada di antrean — belum lunas / belum diverifikasi, atau sinyal. Cari nomor PLT-nya manual.`)
-      if (o.done) return setAlert(`${o.code} sudah diambil${o.pickedBy ? ` (${o.pickedBy})` : ''} — jangan diserahkan lagi.`)
-      openFound(o.id, o.code, ref)
-    })
-    // once, when the queue is first here
-  }, [pin, orders]) // eslint-disable-line react-hooks/exhaustive-deps
   /** a sale the Sheet hasn't seen: its own record goes first, so the tap that follows has something to land on */
   const deliver = (o: QueueOrder) => {
     if (!pin || (orders ?? []).some((x) => x.id === o.id)) return

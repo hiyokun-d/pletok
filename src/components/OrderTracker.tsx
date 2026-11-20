@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type Ch
 import { ArrowLeft, ArrowRight, Ban, Check, CloudOff, Send, Gift, CheckCircle2, ChevronDown, Copy, Hourglass, ImageUp, KeyRound, Landmark, Loader2, MapPin, MessageCircle, Phone, QrCode, RefreshCw, Search, ShieldAlert, XCircle } from 'lucide-react'
 import { ADMIN_FIRST, ADMIN_NAME, ADMIN_WA, ADMIN_WA_PRETTY, EVENT, adminChat } from '../data/event'
 import { rupiah } from '../data/preorder'
-import { FINAL_PREORDER_ERRORS, crewPin, findOrders, health, onHealth, lookupOrders, setPreorderPay, submitPreorder, uploadProof, type OrderStatus, type PreorderConfig, type PreorderPay, type Promo, type PublicOrder } from '../lib/backend'
+import { FINAL_PREORDER_ERRORS, findOrders, health, onHealth, lookupOrders, setPreorderPay, submitPreorder, uploadProof, type OrderStatus, type PreorderConfig, type PreorderPay, type Promo, type PublicOrder } from '../lib/backend'
 import { spring } from '../lib/motion'
 import { useLite } from '../lib/perf'
 import { ParticleField } from './ParticleField'
@@ -670,12 +670,6 @@ export function OrderTracker({ order, config, onBack, onProof, checkedAt, onRetr
                   <LinkQr url={`${location.origin}/c/${order.ref}`} />
                 </div>
                 <p className="mt-2 text-center font-cond text-sm italic text-brown-soft">Scan di booth · terangkan layar HP-mu</p>
-                {crewPin() && (
-                  // a crew phone that opened this from its Camera app: straight to the hand-over
-                  <a href={`/pickup?ambil=${encodeURIComponent(order.ref)}`} className="mt-3 flex items-center justify-center gap-2 rounded-full bg-brown px-4 py-2.5 font-display font-semibold text-cream">
-                    <KeyRound className="size-4" /> Serahkan di /pickup
-                  </a>
-                )}
                 <p className="mt-3 font-cond text-sm italic text-brown-soft">Nggak bisa scan? Pakai kode:</p>
                 <div className={`mt-2 grid gap-2 ${order.wa4 ? 'grid-cols-2' : ''}`}>
                   <div className="rounded-2xl bg-cream px-3 py-2 text-center">

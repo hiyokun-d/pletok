@@ -167,8 +167,8 @@ function Sheet({ pin, known, byRef, onClose, onFound }: Props) {
         {cam !== 'on' && (
           <ol className="mt-4 flex flex-col gap-2 rounded-2xl bg-brown/[0.06] p-4 text-sm">
             <li className="flex gap-2"><Camera className="mt-0.5 size-4 shrink-0 text-terracotta" /> <span>Buka aplikasi <b>Kamera</b> HP ini, arahkan ke QR di HP pembeli (struk, pre-order, atau layar kasir).</span></li>
-            <li className="flex gap-2"><span className="w-4 shrink-0 text-center font-bold text-terracotta">2</span> <span>Tap link <b>pletok…/r/…</b> atau <b>pletok…/c/…</b> yang muncul.</span></li>
-            <li className="flex gap-2"><span className="w-4 shrink-0 text-center font-bold text-terracotta">3</span> <span>Tekan <b>Tambahkan ke pickup</b> (struk) atau <b>Serahkan di /pickup</b> (pre-order).</span></li>
+            <li className="flex gap-2"><span className="w-4 shrink-0 text-center font-bold text-terracotta">2</span> <span>Tap link <b>pletok…/r/…</b> yang muncul.</span></li>
+            <li className="flex gap-2"><span className="w-4 shrink-0 text-center font-bold text-terracotta">3</span> <span>Tekan <b>Tambahkan ke pickup</b> → kembali ke tab ini. QR pre-order: tempel link-nya di bawah.</span></li>
           </ol>
         )}
 
