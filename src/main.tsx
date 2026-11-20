@@ -5,6 +5,7 @@ import { SpeedInsights } from '@vercel/speed-insights/react'
 import { GoHop, type HopTarget } from './views/GoHop'
 import { TRAP_PATH, TrapPage } from './views/TrapPage'
 import { SystemStatus } from './components/SystemStatus'
+import { CrewRouter } from './components/CrewRouter'
 import { ThemeHost } from './components/SunsetTheme'
 import { ErrorBoundary, ErrorPage, type ErrorKind } from './views/ErrorPage'
 import { beforeSend, installClickTracking, trackSource } from './lib/analytics'
@@ -36,8 +37,9 @@ const PAGES: Record<string, () => Promise<ReactNode>> = {
   '/pickup': () => import('./views/PickupPage').then((m) => <m.PickupPage />),
   '/struk': () => import('./views/ReceiptPage').then((m) => <m.SavedReceiptsPage />),
 }
-/** the crew tabs: once one is open, the others download quietly so switching is instant */
+/** the crew tabs: once one is open, the others download quietly, and switching between them doesn't reload */
 const CREW = ['/cashier', '/pickup', '/hasil', '/financial', '/config']
+const CREW_PAGES = Object.fromEntries(CREW.map((p) => [p, PAGES[p]]))
 // dev only: /_error/500 (or 503, offline) previews the other error pages
 const preview = import.meta.env.DEV ? path.match(/^\/_error\/(404|500|503|offline)$/)?.[1] : undefined
 const load = async (): Promise<ReactNode> =>
@@ -82,7 +84,7 @@ requestAnimationFrame(() => {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ErrorBoundary>{page}</ErrorBoundary>
+    <ErrorBoundary>{CREW.includes(path) ? <CrewRouter first={page} pages={CREW_PAGES} /> : page}</ErrorBoundary>
     {/* the look picked on /config (menu, /cashier, /link) */}
     {!hop && <ThemeHost />}
     {/* offline / Sheet down / back again — the booth app has its own island for this */}

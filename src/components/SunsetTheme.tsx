@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
+import { usePath } from '../lib/nav'
 import { motion, useReducedMotion, useSpring, useTransform, type MotionValue } from 'motion/react'
 import { useMenu } from '../hooks/useMenu'
 
@@ -27,7 +28,7 @@ const PATHS = ['', '/link', '/cashier']
 
 export function ThemeHost() {
   const { theme } = useMenu()
-  const path = window.location.pathname.replace(/\/+$/, '')
+  const path = usePath()
   const on = theme === 'sunset' && PATHS.includes(path)
   useEffect(() => {
     if (!on) return

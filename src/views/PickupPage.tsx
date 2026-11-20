@@ -74,6 +74,8 @@ function fits(o: QueueOrder, w: string) {
 }
 
 
+/** the yellow button: first a call, then "call again" for as long as they haven't come */
+const callLabel = (o: QueueOrder, n = 0) => (!o.ready ? 'Siap · panggil' : `Panggil lagi · ${n > 1 ? `${n}×` : o.readyAt ? hhmm(o.readyAt) : '1×'}`)
 const minutesAgo = (at: number) => Math.max(0, Math.round((Date.now() - at) / 60_000))
 
 export function PickupPage() {
@@ -212,9 +214,12 @@ export function PickupPage() {
 
   // "Siap": the buyer's receipt page rings
   const [calling, setCalling] = useState<Set<string>>(new Set())
+  // how many times each order has been called from this phone — a loud booth means calling again
+  const [calls, setCalls] = useState<Record<string, number>>({})
   const call = async (o: QueueOrder) => {
     if (!pin) return
     setCalling((c) => new Set(c).add(o.id))
+    setCalls((c) => ({ ...c, [o.id]: (c[o.id] ?? (o.ready ? 1 : 0)) + 1 }))
     setMark(o.id, { ready: true })
     const ok = await markReady(pin, o.id)
     if (ok) setOrders((os) => os?.map((x) => (x.id === o.id ? { ...x, ready: true, readyAt: Date.now() } : x)) ?? os)
@@ -355,6 +360,9 @@ export function PickupPage() {
           pin={pin}
           onAlert={setAlert}
           onBooth={(o) => mark(o, true)}
+          onCall={call}
+          calling={calling}
+          calls={calls}
           onDone={(id, by, done) => (setMark(id, { done, by }), setOrders((os) => os?.map((x) => (x.id === id ? { ...x, done, pickedBy: by } : x)) ?? os))}
         />
       ) : (
@@ -474,12 +482,12 @@ export function PickupPage() {
                         <motion.button
                           type="button"
                           whileTap={{ scale: 0.95 }}
-                          disabled={o.ready || calling.has(o.id)}
+                          disabled={calling.has(o.id)}
                           onClick={() => void call(o)}
-                          className="flex items-center justify-center gap-1.5 rounded-full bg-[#e8b53a] py-3.5 font-display font-semibold text-brown shadow-[0_5px_0_#a87d1c] disabled:bg-[#e8b53a]/30 disabled:shadow-none"
+                          className="flex items-center justify-center gap-1.5 rounded-full bg-[#e8b53a] py-3.5 font-display font-semibold text-brown shadow-[0_5px_0_#a87d1c] disabled:opacity-70"
                         >
                           {calling.has(o.id) ? <Loader2 className="size-5 animate-spin" /> : <BellRing className="size-5" />}
-                          {o.ready ? `Dipanggil${o.readyAt ? ' ' + hhmm(o.readyAt) : ''}` : 'Siap · panggil'}
+                          {callLabel(o, calls[o.id])}
                         </motion.button>
                         <motion.button
                           type="button"
@@ -674,6 +682,9 @@ function FocusDesk({
   onAlert,
   onDone,
   onBooth,
+  onCall,
+  calling,
+  calls,
 }: {
   orders: QueueOrder[] | null
   waiting: number
@@ -681,6 +692,10 @@ function FocusDesk({
   onAlert: (t: string) => void
   onDone: (id: string, by: string, done: boolean) => void
   onBooth: (o: QueueOrder) => Promise<void>
+  /** "Siap · panggil": the buyer's struk rings — same as the list view */
+  onCall: (o: QueueOrder) => Promise<void>
+  calling: Set<string>
+  calls: Record<string, number>
 }) {
   const [src, setSrc] = useState<'po' | 'booth'>('po')
   const [num, setNum] = useState('')
@@ -834,16 +849,29 @@ function FocusDesk({
                   </p>
                 )}
                 <p className="mt-2 font-cond text-sm italic text-brown-soft">Struk asli: jam di halamannya berdetik & segelnya berputar.</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void onBooth(o)
-                    setHanded({ o, by: 'struk' })
-                  }}
-                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-full bg-leaf py-4 font-display text-lg font-semibold text-cream shadow-[0_5px_0_#3f5426]"
-                >
-                  <Check className="size-5" /> Cocok · Serahkan
-                </button>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.95 }}
+                    disabled={calling.has(o.id)}
+                    onClick={() => void onCall(o)}
+                    className="flex items-center justify-center gap-2 rounded-full bg-[#e8b53a] py-4 font-display text-lg font-semibold text-brown shadow-[0_5px_0_#a87d1c] disabled:opacity-70"
+                  >
+                    {calling.has(o.id) ? <Loader2 className="size-5 animate-spin" /> : <BellRing className="size-5" />}
+                    {callLabel(o, calls[o.id])}
+                  </motion.button>
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => {
+                      void onBooth(o)
+                      setHanded({ o, by: 'struk' })
+                    }}
+                    className="flex items-center justify-center gap-2 rounded-full bg-leaf py-4 font-display text-lg font-semibold text-cream shadow-[0_5px_0_#3f5426]"
+                  >
+                    <Check className="size-5" /> Cocok · Serahkan
+                  </motion.button>
+                </div>
               </>
             )}
             <div className="mt-3 grid grid-cols-2 gap-2">

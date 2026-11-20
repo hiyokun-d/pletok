@@ -205,6 +205,8 @@ export const crewPin = () => {
 export async function setCrewPin(pin: string | null): Promise<boolean> {
   if (pin === null) {
     localStorage.removeItem(PIN_KEY)
+    // signed out: the customer data kept for quick page loads goes with it
+    Object.values(WARM).forEach((k) => localStorage.removeItem(k))
     return true
   }
   const ok = await post({ type: 'pin', pin })
@@ -249,20 +251,23 @@ export interface Results {
 
 /*
  * Crew data kept warm. Every crew page preloads the queue and the results in the background
- * (main.tsx), so the page opened next starts on a copy that's seconds old instead of a spinner,
- * then refreshes. Kept for this browser tab only (sessionStorage) — it holds customer names.
+ * (main.tsx), so the page opened next — even in a new tab — starts on a copy that's seconds old
+ * instead of a spinner, then refreshes. Kept on the crew phone only (it's behind the PIN, like the
+ * pickup cache); a copy older than 12 h — yesterday's, a test run — is ignored.
  */
 const WARM = { queue: 'pletok:warm-queue', results: 'pletok:warm-results' } as const
+const WARM_MAX_MS = 12 * 3_600_000
 export function warm<K extends keyof typeof WARM>(k: K): { at: number; data: K extends 'queue' ? QueueOrder[] : Results } | null {
   try {
-    return JSON.parse(sessionStorage.getItem(WARM[k]) ?? 'null')
+    const w = JSON.parse(localStorage.getItem(WARM[k]) ?? 'null')
+    return w && Date.now() - w.at < WARM_MAX_MS ? w : null
   } catch {
     return null
   }
 }
 const keepWarm = (k: keyof typeof WARM, data: unknown) => {
   try {
-    sessionStorage.setItem(WARM[k], JSON.stringify({ at: Date.now(), data }))
+    localStorage.setItem(WARM[k], JSON.stringify({ at: Date.now(), data }))
   } catch {
     /* full or blocked — the page still loads it live */
   }

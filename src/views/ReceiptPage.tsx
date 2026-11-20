@@ -8,6 +8,7 @@ import { rupiah } from '../data/preorder'
 import { ADMIN_WA, adminChat } from '../data/event'
 import { hhmm } from './adminUi'
 import { chime, unlockAudio } from '../lib/chime'
+import { LinkQr } from '../components/LinkQr'
 
 /*
  * /r/<sale id> — the buyer's receipt, opened from the QR the cashier shows after "Lunas".
@@ -67,7 +68,8 @@ export function ReceiptPage({ id }: { id: string }) {
   const [state, setState] = useState<'loading' | 'ok' | 'none' | 'offline'>('loading')
   const [now, setNow] = useState(Date.now())
   const [armed, setArmed] = useState(false)
-  const rang = useRef(false)
+  // the call time we last rang for — every new "panggil" from pickup rings again
+  const rang = useRef(0)
 
   // poll: quick while waiting for the drink, then slow, stop once it's handed over
   useEffect(() => {
@@ -97,13 +99,16 @@ export function ReceiptPage({ id }: { id: string }) {
     return () => window.clearInterval(t)
   }, [])
 
-  // ready → ring, once
+  // ready → ring; called again (a loud, crowded booth) → ring again, longer and louder
   const ready = r?.status === 'ready'
+  const calledAt = r?.readyAt ?? 0
   useEffect(() => {
-    if (!ready || rang.current) return
-    rang.current = true
-    navigator.vibrate?.([300, 120, 300, 120, 600])
+    if (!ready || rang.current === (calledAt || 1)) return
+    const again = rang.current !== 0
+    rang.current = calledAt || 1
+    navigator.vibrate?.(again ? [500, 150, 500, 150, 500, 150, 900] : [300, 120, 300, 120, 600])
     chime()
+    if (again) [700, 1400].forEach((ms) => window.setTimeout(() => chime([988, 1319, 1568]), ms))
     try {
       if ('Notification' in window && Notification.permission === 'granted') new Notification(`${r!.code} siap diambil!`, { body: 'Ambil di Meja 9 · Pletok', tag: id })
     } catch {
@@ -119,7 +124,7 @@ export function ReceiptPage({ id }: { id: string }) {
       window.clearInterval(t)
       document.title = base
     }
-  }, [ready, r, id])
+  }, [ready, calledAt, r, id])
 
   // the tap that unlocks sound + notifications (browsers only allow them after one)
   const arm = async () => {
@@ -229,6 +234,8 @@ export function ReceiptPage({ id }: { id: string }) {
               </button>
             )}
 
+            {(r.status === 'process' || r.status === 'ready') && <PickupQr />}
+
             {/* the receipt itself */}
             <section className="mt-4 rounded-[2rem] border border-brown/10 bg-cream/80 p-5 font-display">
               <div className="flex items-baseline justify-between gap-2">
@@ -328,6 +335,7 @@ function TempReceipt({ r, packed }: { r: BoothReceipt; packed: NonNullable<Retur
             {r.name ? <> + nama <b>{r.name}</b></> : null}.
           </span>
         </p>
+        <PickupQr />
         <section className="mt-4 rounded-[2rem] border border-brown/10 bg-cream/80 p-5 font-display">
           <div className="flex items-baseline justify-between gap-2">
             <p className="font-bold">{r.name ? `a.n. ${r.name}` : 'Pembeli booth'}</p>
@@ -396,5 +404,26 @@ function CrewAdd({ packed }: { packed: NonNullable<ReturnType<typeof unpack>> })
         </button>
       )}
     </div>
+  )
+}
+
+/**
+ * The buyer's own copy of the cashier's QR: the pickup crew scans it off this screen ("Scan struk")
+ * and gets the whole order — even when neither phone has signal. Only on a struk that came from that
+ * QR (the order is packed in the link).
+ */
+function PickupQr() {
+  const url = window.location.href
+  if (!/#s=/.test(url)) return null
+  return (
+    <section className="mt-4 flex items-center gap-4 rounded-[2rem] border border-brown/10 bg-cream/80 p-4 font-display">
+      <div className="w-36 shrink-0">
+        <LinkQr url={url} ecc="M" />
+      </div>
+      <p className="text-sm">
+        <b className="block text-base">Tunjukkan ke kru pickup</b>
+        Kalau kru belum lihat pesananmu (sinyal lagi putus), mereka scan QR ini — pesananmu langsung masuk.
+      </p>
+    </section>
   )
 }
