@@ -3,11 +3,12 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type Ch
 import { ArrowLeft, ArrowRight, Ban, Check, CloudOff, Send, Gift, CheckCircle2, ChevronDown, Copy, Hourglass, ImageUp, KeyRound, Landmark, Loader2, MapPin, MessageCircle, Phone, QrCode, RefreshCw, Search, ShieldAlert, XCircle } from 'lucide-react'
 import { ADMIN_FIRST, ADMIN_NAME, ADMIN_WA, ADMIN_WA_PRETTY, EVENT, adminChat } from '../data/event'
 import { rupiah } from '../data/preorder'
-import { FINAL_PREORDER_ERRORS, findOrders, health, onHealth, lookupOrders, setPreorderPay, submitPreorder, uploadProof, type OrderStatus, type PreorderConfig, type PreorderPay, type Promo, type PublicOrder } from '../lib/backend'
+import { FINAL_PREORDER_ERRORS, crewPin, findOrders, health, onHealth, lookupOrders, setPreorderPay, submitPreorder, uploadProof, type OrderStatus, type PreorderConfig, type PreorderPay, type Promo, type PublicOrder } from '../lib/backend'
 import { spring } from '../lib/motion'
 import { useLite } from '../lib/perf'
 import { ParticleField } from './ParticleField'
 import { QrisCode } from './QrisCode'
+import { LinkQr } from './LinkQr'
 import { Morph } from './Morph'
 
 /* ------------------------------------------------------------------ the phone's own orders */
@@ -663,6 +664,19 @@ export function OrderTracker({ order, config, onBack, onProof, checkedAt, onRetr
             {order.status === 'process' && order.ref && (
               <div className="mt-4 w-full max-w-sm rounded-3xl border-2 border-dashed border-leaf/50 bg-leaf/10 p-4 text-left">
                 <p className="font-display font-bold">Saat ambil di booth, tunjukkan ini</p>
+                {/* the pickup QR: the same /c/<kode cek> link WhatsApp sent — the crew scans it on /pickup
+                    and the order opens with its kode cek filled in (they still hand it over by hand) */}
+                <div className="mx-auto mt-3 w-[min(62vw,220px)] rounded-3xl bg-white p-4 shadow-[0_6px_0_rgb(58_28_15/0.15)]">
+                  <LinkQr url={`${location.origin}/c/${order.ref}`} />
+                </div>
+                <p className="mt-2 text-center font-cond text-sm italic text-brown-soft">Scan di booth · terangkan layar HP-mu</p>
+                {crewPin() && (
+                  // a crew phone that opened this from its Camera app: straight to the hand-over
+                  <a href={`/pickup?ambil=${encodeURIComponent(order.ref)}`} className="mt-3 flex items-center justify-center gap-2 rounded-full bg-brown px-4 py-2.5 font-display font-semibold text-cream">
+                    <KeyRound className="size-4" /> Serahkan di /pickup
+                  </a>
+                )}
+                <p className="mt-3 font-cond text-sm italic text-brown-soft">Nggak bisa scan? Pakai kode:</p>
                 <div className={`mt-2 grid gap-2 ${order.wa4 ? 'grid-cols-2' : ''}`}>
                   <div className="rounded-2xl bg-cream px-3 py-2 text-center">
                     <p className="font-cond text-xs italic text-brown-soft">Kode cek</p>

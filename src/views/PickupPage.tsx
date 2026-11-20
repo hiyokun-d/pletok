@@ -1,9 +1,9 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Bell, BellOff, BellRing, Check, CloudOff, CupSoda, Focus, HandPlatter, KeyRound, LayoutGrid, Loader2, RotateCcw, ScanLine, Search, ShieldAlert, ShieldCheck, StickyNote, UserRoundCheck, WifiOff } from 'lucide-react'
-import { BACKEND, crewPin, warm, enqueue, fetchQueue, markPickedUp, markReady, pickUpPreorder, proofMatches, type QueueOrder } from '../lib/backend'
+import { BACKEND, crewPin, warm, enqueue, fetchQueue, findOrders, markPickedUp, markReady, pickUpPreorder, proofMatches, type QueueOrder } from '../lib/backend'
 import { cachedQueue, forgetSales, localSales, marks, onCrewLocal, saveQueue, setMark, settleMarks } from '../lib/crewLocal'
-import { ScanStruk } from '../components/ScanStruk'
+import { ScanStruk, preorderRef } from '../components/ScanStruk'
 import { PREORDER_ITEMS } from '../data/preorder'
 import { DRINKS } from '../data/menu'
 import { CrewNav, Empty, PinGate, Shell, hhmm, useCrewPage } from './adminUi'
@@ -111,6 +111,8 @@ export function PickupPage() {
   const [focus, setFocus] = useState(() => stored(FOCUS_KEY))
   // the order "Scan struk" found while in focus mode
   const [pick, setPick] = useState<{ id: string; at: number } | null>(null)
+  // a pre-order opened from its pickup QR: its kode cek goes straight into the proof box
+  const [scanProof, setScanProof] = useState<{ id: string; ref: string } | null>(null)
   const [toast, setToast] = useState<QueueOrder[]>([])
   const [unseen, setUnseen] = useState(0)
 
@@ -195,6 +197,39 @@ export function PickupPage() {
       return o.id in pending ? { ...x, done: pending[o.id] } : x
     })
   }, [orders, pending, localVer])
+  /** a pre-order from its kode cek — matched on this phone against the queue's hashes (works offline);
+   *  an older Sheet without them is asked which order the code belongs to. Read-only either way. */
+  const byRef = async (ref: string) => {
+    const pos = all.filter((o) => o.src === 'po')
+    for (const o of pos) if ((await proofMatches(o, ref)) === 'kode cek') return o
+    if (pos.some((o) => o.vref)) return undefined
+    const hit = (await findOrders({ ref }))?.[0]
+    return hit ? pos.find((o) => o.id === hit.id) : undefined
+  }
+  const openFound = (id: string, code: string, proof?: string) => {
+    setScanProof(proof ? { id, ref: proof } : null)
+    // already in the Sheet → its real number; otherwise the temporary one
+    // focus mode stays: the scanned order opens in the focus card; the list jumps to it
+    if (focus) setPick({ id, at: Date.now() })
+    else {
+      setFilter('all')
+      setQ((orders ?? []).find((o) => o.id === id)?.code ?? code)
+    }
+  }
+  // the phone's own Camera app read a pickup QR → the customer page sent us here: /pickup?ambil=KODE
+  const ambil = useRef(new URLSearchParams(location.search).get('ambil'))
+  useEffect(() => {
+    const ref = ambil.current && preorderRef(`/c/${ambil.current}`)
+    if (!ref || !pin || !orders) return
+    ambil.current = null
+    history.replaceState(null, '', location.pathname)
+    void byRef(ref).then((o) => {
+      if (!o) return setAlert(`Pre-order dengan kode ${ref} belum ada di antrean — belum lunas / belum diverifikasi, atau sinyal. Cari nomor PLT-nya manual.`)
+      if (o.done) return setAlert(`${o.code} sudah diambil${o.pickedBy ? ` (${o.pickedBy})` : ''} — jangan diserahkan lagi.`)
+      openFound(o.id, o.code, ref)
+    })
+    // once, when the queue is first here
+  }, [pin, orders]) // eslint-disable-line react-hooks/exhaustive-deps
   /** a sale the Sheet hasn't seen: its own record goes first, so the tap that follows has something to land on */
   const deliver = (o: QueueOrder) => {
     if (!pin || (orders ?? []).some((x) => x.id === o.id)) return
@@ -282,7 +317,7 @@ export function PickupPage() {
             </span>
           )}
           <button type="button" onClick={() => setScan(true)} className="flex items-center gap-1.5 rounded-full border-2 border-brown/15 px-3.5 py-2 font-display text-sm font-semibold">
-            <ScanLine className="size-4" /> Scan struk
+            <ScanLine className="size-4" /> Scan QR
           </button>
           <button
             type="button"
@@ -347,13 +382,11 @@ export function PickupPage() {
         open={scan}
         pin={pin}
         known={(id) => all.find((o) => o.id === id)}
+        byRef={byRef}
         onClose={() => setScan(false)}
-        onFound={(id, code) => {
+        onFound={(id, code, proof) => {
           setScan(false)
-          // already in the Sheet → its real number; otherwise the temporary one
-          // focus mode stays: the scanned order opens in the focus card; the list jumps to it
-          if (focus) setPick({ id, at: Date.now() })
-          else setQ((orders ?? []).find((o) => o.id === id)?.code ?? code)
+          openFound(id, code, proof)
         }}
       />
 
@@ -368,6 +401,7 @@ export function PickupPage() {
           calling={calling}
           calls={calls}
           pick={pick}
+          proofFor={scanProof}
           onDone={(id, by, done) => (setMark(id, { done, by }), setOrders((os) => os?.map((x) => (x.id === id ? { ...x, done, pickedBy: by } : x)) ?? os))}
         />
       ) : (
@@ -474,7 +508,7 @@ export function PickupPage() {
                     </p>
                   )}
                   {o.src === 'po' ? (
-                    <HandOver order={o} pin={pin} onAlert={setAlert} onDone={(by, done) => (setMark(o.id, { done, by }), setOrders((os) => os?.map((x) => (x.id === o.id ? { ...x, done, pickedBy: by } : x)) ?? os))} />
+                    <HandOver order={o} pin={pin} initialProof={scanProof?.id === o.id ? scanProof.ref : undefined} onAlert={setAlert} onDone={(by, done) => (setMark(o.id, { done, by }), setOrders((os) => os?.map((x) => (x.id === o.id ? { ...x, done, pickedBy: by } : x)) ?? os))} />
                   ) : (
                     <>
                       {o.ref && (
@@ -556,8 +590,12 @@ type Match = 'kode cek' | '4 digit WA' | 'unknown' | null
  * Either way the Sheet is told in the background, writes down how it was checked, and refuses a
  * second pickup of the same order (that comes back as an alert) — the one rule that's never optional.
  */
-function HandOver({ order: o, pin, onDone, onAlert, autoFocus = false }: { order: QueueOrder; pin: string; onDone: (by: string, done: boolean) => void; onAlert: (text: string) => void; autoFocus?: boolean }) {
-  const [typed, setTyped] = useState('')
+function HandOver({ order: o, pin, onDone, onAlert, autoFocus = false, initialProof }: { order: QueueOrder; pin: string; onDone: (by: string, done: boolean) => void; onAlert: (text: string) => void; autoFocus?: boolean; initialProof?: string }) {
+  // scanned off the customer's pickup QR: the kode cek is already in — the crew still taps Serahkan
+  const [typed, setTyped] = useState(initialProof ?? '')
+  useEffect(() => {
+    if (initialProof) setTyped(initialProof)
+  }, [initialProof])
   const [match, setMatch] = useState<Match>(null)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<string | null>(null)
@@ -691,6 +729,7 @@ function FocusDesk({
   calling,
   calls,
   pick,
+  proofFor,
 }: {
   orders: QueueOrder[] | null
   waiting: number
@@ -703,6 +742,7 @@ function FocusDesk({
   calling: Set<string>
   calls: Record<string, number>
   pick: { id: string; at: number } | null
+  proofFor: { id: string; ref: string } | null
 }) {
   const [src, setSrc] = useState<'po' | 'booth'>('po')
   const [num, setNum] = useState('')
@@ -862,6 +902,7 @@ function FocusDesk({
                 key={`${o.id}-${round}`}
                 order={o}
                 pin={pin}
+                initialProof={proofFor?.id === o.id ? proofFor.ref : undefined}
                 autoFocus
                 onAlert={onAlert}
                 onDone={(by, done) => {

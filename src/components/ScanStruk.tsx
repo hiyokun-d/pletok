@@ -12,16 +12,30 @@ import type { QueueOrder } from '../lib/backend'
  *   - the rest (Safari / iPhone): the phone's own Camera app reads it → tap the link → the struk
  *     page shows crew phones a "Tambahkan ke pickup" button. Same result, one extra tap.
  *   - a link sent over WhatsApp can be pasted in too
+ * It also reads a pre-order's pickup QR (the customer's "Lunas!" screen): that's their /c/<kode cek>
+ * link, the same one WhatsApp sent them. The order opens with its kode cek already filled in — the
+ * crew still taps "Serahkan", and the Sheet still checks it and refuses a second pickup.
  */
 
 type Detector = { detect: (src: CanvasImageSource) => Promise<Array<{ rawValue: string }>> }
 type DetectorCtor = new (o: { formats: string[] }) => Detector
 const Native = (globalThis as unknown as { BarcodeDetector?: DetectorCtor }).BarcodeDetector
 
-type Result = { kind: 'ok'; code: string; id: string } | { kind: 'bad' | 'old' | 'other'; text: string }
+type Result = { kind: 'ok'; code: string; id: string; proof?: string; po?: boolean } | { kind: 'bad' | 'old' | 'other'; text: string }
+
+/** a pre-order pickup QR / link → its kode cek: …/c/BR5HA2 or …/preorder?cek=BR5HA2 */
+export const preorderRef = (text: string) =>
+  text.trim().match(/\/c\/([A-Za-z0-9]{4,12})\/?(?:[?#].*)?$/)?.[1]?.toUpperCase() ?? text.trim().match(/[?&]cek=([A-Za-z0-9]{4,12})(?:[&#]|$)/)?.[1]?.toUpperCase()
 
 /** what a scanned / pasted text means for the queue */
-async function take(pin: string, text: string, known: (id: string) => QueueOrder | undefined): Promise<Result> {
+async function take(pin: string, text: string, known: (id: string) => QueueOrder | undefined, byRef: FindRef): Promise<Result> {
+  const ref = preorderRef(text)
+  if (ref) {
+    const o = await byRef(ref)
+    if (!o) return { kind: 'old', text: `Pre-order dengan kode ${ref} belum ada di antrean — belum lunas / belum diverifikasi admin, atau sinyal. Cari nomor PLT-nya manual.` }
+    if (o.done) return { kind: 'bad', text: `${o.code} sudah diambil${o.pickedBy ? ` (${o.pickedBy})` : ''} — jangan diserahkan lagi.` }
+    return { kind: 'ok', code: o.code, id: o.id, proof: ref, po: true }
+  }
   const m = text.trim().match(/\/r\/([A-Za-z0-9-]{8,64})\/?(?:[?#].*)?$/)
   if (!m) return { kind: 'other', text: 'Bukan QR struk Pletok.' }
   const packed = unpack(m[1], m[2] ?? (text.match(/#.*$/)?.[0] ?? ''))
@@ -38,19 +52,23 @@ async function take(pin: string, text: string, known: (id: string) => QueueOrder
   return { kind: 'ok', code: '#' + packed.id.slice(0, 4).toUpperCase(), id: packed.id }
 }
 
-type Props = { pin: string; known: (id: string) => QueueOrder | undefined; onClose: () => void; onFound: (id: string, code: string) => void }
+/** a pre-order from its kode cek (checked against the queue's hashes, or asked of the Sheet) */
+export type FindRef = (ref: string) => Promise<QueueOrder | undefined>
+type Props = { pin: string; known: (id: string) => QueueOrder | undefined; byRef: FindRef; onClose: () => void; onFound: (id: string, code: string, proof?: string) => void }
 
 export function ScanStruk({ open, ...props }: Props & { open: boolean }) {
   return <AnimatePresence>{open && <Sheet key="scan" {...props} />}</AnimatePresence>
 }
 
-function Sheet({ pin, known, onClose, onFound }: Props) {
+function Sheet({ pin, known, byRef, onClose, onFound }: Props) {
   const video = useRef<HTMLVideoElement>(null)
   // the page re-renders every few seconds (its poll) — the camera mustn't restart each time
   const found = useRef(onFound)
   found.current = onFound
   const lookup = useRef(known)
   lookup.current = known
+  const findRef = useRef(byRef)
+  findRef.current = byRef
   // a camera facing you (laptop webcam, selfie camera) shows as a mirror — easier to aim the QR
   const [mirror, setMirror] = useState(false)
   const [cam, setCam] = useState<'starting' | 'on' | 'denied' | 'none'>(Native ? 'starting' : 'none')
@@ -72,11 +90,11 @@ function Sheet({ pin, known, onClose, onFound }: Props) {
         try {
           const [hit] = await detector.detect(v)
           if (hit && live) {
-            const r = await take(pin, hit.rawValue, lookup.current)
+            const r = await take(pin, hit.rawValue, lookup.current, findRef.current)
             setResult(r)
             if (r.kind === 'ok') {
               navigator.vibrate?.(80)
-              window.setTimeout(() => live && found.current(r.id, r.code), 700)
+              window.setTimeout(() => live && found.current(r.id, r.code, r.proof), 700)
               return
             }
           }
@@ -109,16 +127,16 @@ function Sheet({ pin, known, onClose, onFound }: Props) {
   }, [pin])
 
   const submitPaste = async () => {
-    const r = await take(pin, paste, lookup.current)
+    const r = await take(pin, paste, lookup.current, findRef.current)
     setResult(r)
-    if (r.kind === 'ok') window.setTimeout(() => found.current(r.id, r.code), 700)
+    if (r.kind === 'ok') window.setTimeout(() => found.current(r.id, r.code, r.proof), 700)
   }
 
   return (
     <motion.div className="fixed inset-0 z-50 grid place-items-end bg-brown/60 backdrop-blur-sm sm:place-items-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
       <motion.div
         role="dialog"
-        aria-label="Scan struk pembeli"
+        aria-label="Scan QR struk atau pre-order"
         onClick={(e) => e.stopPropagation()}
         className="max-h-[92dvh] w-full overflow-y-auto rounded-t-[2rem] bg-cream p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] font-display text-brown sm:max-w-md sm:rounded-[2rem]"
         initial={{ y: 60 }}
@@ -127,10 +145,10 @@ function Sheet({ pin, known, onClose, onFound }: Props) {
         transition={{ type: 'spring', stiffness: 380, damping: 32 }}
       >
         <div className="flex items-center justify-between">
-          <p className="flex items-center gap-2 text-xl font-bold"><ScanLine className="size-6 text-terracotta" /> Scan struk pembeli</p>
+          <p className="flex items-center gap-2 text-xl font-bold"><ScanLine className="size-6 text-terracotta" /> Scan QR pembeli</p>
           <button type="button" onClick={onClose} aria-label="Tutup" className="grid size-9 place-items-center rounded-full bg-brown/10"><X className="size-5" /></button>
         </div>
-        <p className="mt-1 font-cond text-sm italic text-brown-soft">Jalan tanpa internet — isi pesanan ada di dalam QR-nya.</p>
+        <p className="mt-1 font-cond text-sm italic text-brown-soft">Struk kasir (jalan tanpa internet) atau QR pre-order dari layar "Lunas!".</p>
 
         {cam !== 'none' && (
           <div className="relative mt-4 aspect-square overflow-hidden rounded-3xl bg-brown">
@@ -148,15 +166,15 @@ function Sheet({ pin, known, onClose, onFound }: Props) {
 
         {cam !== 'on' && (
           <ol className="mt-4 flex flex-col gap-2 rounded-2xl bg-brown/[0.06] p-4 text-sm">
-            <li className="flex gap-2"><Camera className="mt-0.5 size-4 shrink-0 text-terracotta" /> <span>Buka aplikasi <b>Kamera</b> HP ini, arahkan ke QR struk di HP pembeli (atau layar kasir).</span></li>
-            <li className="flex gap-2"><span className="w-4 shrink-0 text-center font-bold text-terracotta">2</span> <span>Tap link <b>pletok…/r/…</b> yang muncul.</span></li>
-            <li className="flex gap-2"><span className="w-4 shrink-0 text-center font-bold text-terracotta">3</span> <span>Tekan <b>Tambahkan ke pickup</b> → kembali ke tab ini, pesanannya sudah ada.</span></li>
+            <li className="flex gap-2"><Camera className="mt-0.5 size-4 shrink-0 text-terracotta" /> <span>Buka aplikasi <b>Kamera</b> HP ini, arahkan ke QR di HP pembeli (struk, pre-order, atau layar kasir).</span></li>
+            <li className="flex gap-2"><span className="w-4 shrink-0 text-center font-bold text-terracotta">2</span> <span>Tap link <b>pletok…/r/…</b> atau <b>pletok…/c/…</b> yang muncul.</span></li>
+            <li className="flex gap-2"><span className="w-4 shrink-0 text-center font-bold text-terracotta">3</span> <span>Tekan <b>Tambahkan ke pickup</b> (struk) atau <b>Serahkan di /pickup</b> (pre-order).</span></li>
           </ol>
         )}
 
         <label className="mt-4 flex items-center gap-2 rounded-2xl bg-cream-deep/80 px-3 py-2.5">
           <ClipboardPaste className="size-5 shrink-0 text-brown-soft" />
-          <input value={paste} onChange={(e) => setPaste(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void submitPaste()} placeholder="…atau tempel link struk" className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
+          <input value={paste} onChange={(e) => setPaste(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void submitPaste()} placeholder="…atau tempel link struk / pre-order" className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
           {paste && (
             <button type="button" onClick={() => void submitPaste()} className="rounded-full bg-brown px-3 py-1 text-sm font-semibold text-cream">Cek</button>
           )}
@@ -173,7 +191,7 @@ function Sheet({ pin, known, onClose, onFound }: Props) {
               className={`mt-3 flex items-start gap-2 overflow-hidden rounded-2xl p-3 text-sm ${result.kind === 'ok' ? 'bg-leaf text-cream' : result.kind === 'bad' ? 'bg-terracotta text-cream' : 'bg-[#e8b53a]/30'}`}
             >
               {result.kind === 'ok' ? <CheckCircle2 className="mt-0.5 size-5 shrink-0" /> : <ShieldAlert className="mt-0.5 size-5 shrink-0" />}
-              {result.kind === 'ok' ? <span><b>{result.code}</b> masuk antrean pickup HP ini.</span> : <span>{result.text}</span>}
+              {result.kind === 'ok' ? <span><b>{result.code}</b> {result.po ? 'ketemu — kode ceknya sudah diisi, tinggal Serahkan.' : 'masuk antrean pickup HP ini.'}</span> : <span>{result.text}</span>}
             </motion.p>
           )}
         </AnimatePresence>
