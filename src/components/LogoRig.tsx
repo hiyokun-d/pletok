@@ -4,6 +4,7 @@ import { LEAF_BOX, LETTERS, LOGO_BOX, LOGO_BROWN, TAGLINE, pct } from '../data/l
 import { Sprout, type SproutState } from './Sprout'
 import { ParticleField } from './ParticleField'
 import { LogoPiece } from './LogoPiece'
+import { isLite } from '../lib/perf'
 
 interface LogoRigProps {
   /** `intro`: a seed drops, the sprout grows in close-up, then the camera pulls back and the wordmark blooms out of the leaf */
@@ -38,6 +39,9 @@ export function LogoRig({ play = 'static', interactive = true, showTagline = tru
   const bloomR = useMotionValue(intro ? 0 : 170)
   const bloomIn = useTransform(bloomR, (v) => v - 14)
   const bloom = useMotionTemplate`radial-gradient(circle at ${LEAF_PT.x}% ${LEAF_PT.y}%, #000 ${bloomIn}%, transparent ${bloomR}%)`
+  // a lite phone repaints a moving mask every frame at ~20 fps — there the wordmark fades in instead
+  const [plain] = useState(isLite)
+  const bloomFade = useTransform(bloomR, [0, 170], [0, 1])
   const finished = useRef(false)
   const pulledBack = useRef(false)
   // the close-up lives in motion values, not in the style prop — a re-render can't put it back
@@ -82,6 +86,7 @@ export function LogoRig({ play = 'static', interactive = true, showTagline = tru
     if (mark) {
       mark.style.maskImage = 'none'
       mark.style.webkitMaskImage = 'none'
+      mark.style.opacity = '1'
     }
     const tag = root?.querySelector<HTMLElement>('.tagline')
     if (tag) {
@@ -195,7 +200,7 @@ export function LogoRig({ play = 'static', interactive = true, showTagline = tru
           aria-label="Pletok"
           viewBox={`${LOGO_BOX.x} ${LOGO_BOX.y} ${LOGO_BOX.w} ${LOGO_BOX.h}`}
           className={`mark absolute inset-0 h-full w-full overflow-visible ${interactive ? 'cursor-pointer' : ''}`}
-          style={intro ? { maskImage: bloom, WebkitMaskImage: bloom } : { originY: 1 }}
+          style={intro ? (plain ? { opacity: bloomFade } : { maskImage: bloom, WebkitMaskImage: bloom }) : { originY: 1 }}
           whileHover={interactive ? { y: '-3%', rotate: -1, transition: { type: 'spring', stiffness: 400, damping: 14 } } : undefined}
           whileTap={interactive ? { scaleY: 0.9, scaleX: 1.05 } : undefined}
         >

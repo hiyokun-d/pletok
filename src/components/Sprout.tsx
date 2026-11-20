@@ -1,6 +1,7 @@
 import { motion, useAnimate } from 'motion/react'
 import { useEffect } from 'react'
 import { LOGO_BROWN } from '../data/logo'
+import { isLite } from '../lib/perf'
 
 export type SproutState = 'hidden' | 'grow' | 'idle' | 'wilt'
 
@@ -51,6 +52,8 @@ export function Sprout({ state, className = '', style, wiggleKey, onGrown, color
       if (state === 'idle') {
         animate('.stem', { pathLength: 1, opacity: 1 }, { duration: 0 })
         animate('.leaf', { scale: 1 }, { duration: 0.2 })
+        // a lite phone keeps its main thread for scrolling — the leaves rest
+        if (isLite()) return
         // secondary action: the two leaves breathe out of phase
         animate('.leaf-l', { rotate: [0, -6, 0, 3, 0] }, { duration: 4.2, repeat: Infinity, ease: 'easeInOut' })
         animate('.leaf-r', { rotate: [0, 5, 0, -4, 0] }, { duration: 3.6, repeat: Infinity, ease: 'easeInOut', delay: 0.4 })

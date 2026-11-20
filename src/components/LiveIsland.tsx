@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
+import { blurFx } from '../lib/perf'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { BadgePercent, CupSoda, Gift, MapPin, MessageCircleHeart, MessageCircleOff, PackageCheck, PartyPopper, RefreshCw, ShoppingBag, Wifi, WifiOff, type LucideIcon } from 'lucide-react'
 import { useEventPhase, type Phase } from '../hooks/useEventPhase'
@@ -209,9 +210,9 @@ export function LiveIsland({ phaseBase, hidden, desktop }: { phaseBase: boolean;
             className="pointer-events-auto relative overflow-hidden bg-[#1a0d06] text-cream shadow-[0_12px_32px_-10px_rgb(0_0_0/0.55)]"
             style={{ borderRadius: open && !note ? 28 : 999 }}
             // drops in as a small bead and swells; leaves the same way
-            initial={{ opacity: 0, scale: 0.35, y: -18, filter: 'blur(6px)' }}
-            animate={{ opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }}
-            exit={{ opacity: 0, scale: 0.35, y: -18, filter: 'blur(6px)', transition: { duration: 0.35, ease: [0.4, 0, 1, 1] } }}
+            initial={{ opacity: 0, scale: 0.35, y: -18, ...blurFx(6) }}
+            animate={{ opacity: 1, scale: 1, y: 0, ...blurFx(0) }}
+            exit={{ opacity: 0, scale: 0.35, y: -18, ...blurFx(6), transition: { duration: 0.35, ease: [0.4, 0, 1, 1] } }}
             transition={ISLAND}
             aria-live="polite"
             aria-expanded={open}
@@ -224,9 +225,9 @@ export function LiveIsland({ phaseBase, hidden, desktop }: { phaseBase: boolean;
                     key={view}
                     layout="position"
                     className={`flex items-center whitespace-nowrap ${desktop ? 'h-8 gap-2 pl-1 pr-3.5' : 'h-11 gap-2.5 pl-1.5 pr-4'}`}
-                    initial={{ opacity: 0, filter: 'blur(6px)' }}
-                    animate={{ opacity: 1, filter: 'blur(0px)', transition: { delay: 0.08 } }}
-                    exit={{ opacity: 0, filter: 'blur(6px)' }}
+                    initial={{ opacity: 0, ...blurFx(6) }}
+                    animate={{ opacity: 1, ...blurFx(0), transition: { delay: 0.08 } }}
+                    exit={{ opacity: 0, ...blurFx(6) }}
                     transition={{ duration: 0.25 }}
                   >
                     <motion.span
@@ -247,8 +248,8 @@ export function LiveIsland({ phaseBase, hidden, desktop }: { phaseBase: boolean;
                     key="open"
                     layout="position"
                     className="flex w-[min(92vw,380px)] flex-col items-center gap-2.5 px-5 pb-4 pt-3"
-                    initial={{ opacity: 0, scale: 0.9, filter: 'blur(4px)' }}
-                    animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+                    initial={{ opacity: 0, scale: 0.9, ...blurFx(4) }}
+                    animate={{ opacity: 1, scale: 1, ...blurFx(0) }}
                     exit={{ opacity: 0, scale: 0.9 }}
                     transition={{ duration: 0.25 }}
                   >
@@ -296,15 +297,15 @@ export function LiveIsland({ phaseBase, hidden, desktop }: { phaseBase: boolean;
             aria-label={`Promo pre-order: sisa ${promoLeft} slot`}
             className="pointer-events-auto flex h-9 items-center gap-1.5 rounded-full bg-[#1a0d06] pl-2.5 pr-3 font-display text-sm font-bold text-cream shadow-[0_12px_32px_-10px_rgb(0_0_0/0.55)]"
             // pinches off the side of the island like a droplet, and merges back the same way
-            initial={{ opacity: 0, scale: 0.3, x: -36, filter: 'blur(6px)' }}
-            animate={{ opacity: 1, scale: 1, x: 0, filter: 'blur(0px)' }}
-            exit={{ opacity: 0, scale: 0.3, x: -36, filter: 'blur(6px)', transition: { duration: 0.3 } }}
+            initial={{ opacity: 0, scale: 0.3, x: -36, ...blurFx(6) }}
+            animate={{ opacity: 1, scale: 1, x: 0, ...blurFx(0) }}
+            exit={{ opacity: 0, scale: 0.3, x: -36, ...blurFx(6), transition: { duration: 0.3 } }}
             transition={ISLAND}
             whileTap={{ scale: 0.9 }}
           >
-            <motion.span animate={{ rotate: [0, -14, 12, -8, 0] }} transition={{ duration: 0.9, repeat: Infinity, repeatDelay: 3 }}>
+            <span className="pk-wiggle inline-flex">
               <Gift className="size-4" style={{ color: GREEN }} />
-            </motion.span>
+            </span>
             <Morph text={String(promoLeft)} className="tabular-nums" />
             <span className="font-normal text-cream/60">slot</span>
           </motion.a>

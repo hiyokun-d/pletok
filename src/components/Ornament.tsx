@@ -1,4 +1,5 @@
 import { motion, type Transition } from 'motion/react'
+import { useLite } from '../lib/perf'
 
 type Variant = 'leaf' | 'spice-star' | 'dashes' | 'batik-corner' | 'divider'
 
@@ -17,17 +18,18 @@ interface OrnamentProps {
  * Strokes draw themselves in (pathLength) so ornaments feel hand-inked.
  */
 export function Ornament({ variant, className = '', color, draw = true, delay = 0, flip = false }: OrnamentProps) {
+  const once = useLite()
   const t = (i = 0, duration = 1.1): Transition => ({ duration, delay: delay + i * 0.12, ease: [0.65, 0, 0.35, 1] })
   const stroke = {
     initial: draw ? { pathLength: 0, opacity: 0 } : false,
     whileInView: { pathLength: 1, opacity: 1 },
-    viewport: { once: false, amount: 0.4 },
+    viewport: { once, amount: 0.4 },
   } as const
   const fillIn = (i = 0) =>
     ({
       initial: draw ? { scale: 0, opacity: 0 } : false,
       whileInView: { scale: 1, opacity: 1 },
-      viewport: { once: false, amount: 0.4 },
+      viewport: { once, amount: 0.4 },
       transition: { type: 'spring', stiffness: 380, damping: 16, delay: delay + 0.3 + i * 0.1 },
     }) as const
   const style = flip ? { transform: 'scaleX(-1)' } : undefined

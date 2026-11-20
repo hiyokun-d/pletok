@@ -5,6 +5,7 @@ import { ADMIN_FIRST, ADMIN_NAME, ADMIN_WA, ADMIN_WA_PRETTY, EVENT, adminChat } 
 import { rupiah } from '../data/preorder'
 import { FINAL_PREORDER_ERRORS, findOrders, health, onHealth, lookupOrders, setPreorderPay, submitPreorder, uploadProof, type OrderStatus, type PreorderConfig, type PreorderPay, type Promo, type PublicOrder } from '../lib/backend'
 import { spring } from '../lib/motion'
+import { useLite } from '../lib/perf'
 import { ParticleField } from './ParticleField'
 import { QrisCode } from './QrisCode'
 import { Morph } from './Morph'
@@ -462,6 +463,9 @@ export function PromoBanner({ promo, left, href, loud = false, className = '' }:
   const used = promo.slots - left
   const off = promo.mode === 'pct' ? `${promo.value}%` : rupiah(promo.value)
   const gone = left <= 0
+  // the breathing scale shares a transform with the layout animation, so it stays in JS — off on a lite phone
+  const lite = useLite()
+  const breathe = loud && !gone && !lite
   // someone just grabbed a slot (or the last one went) while this screen was open: say so
   const [taken, setTaken] = useState<{ n: number; at: number }>()
   const prevLeft = useRef(left)
@@ -477,16 +481,11 @@ export function PromoBanner({ promo, left, href, loud = false, className = '' }:
       {...(href ? { href, 'data-track': 'promo-banner', whileTap: { scale: 0.97 } } : {})}
       className={`relative block overflow-hidden rounded-3xl p-4 text-left ${gone ? 'border-2 border-dashed border-brown/15' : 'bg-leaf text-cream shadow-[0_6px_0_#3f5426]'} ${className}`}
       // loud (top of the landing page): breathes a little so the eye lands on it
-      {...(loud && !gone ? { animate: { scale: [1, 1.025, 1] }, transition: { duration: 2.4, repeat: Infinity, ease: 'easeInOut' } } : {})}
+      {...(breathe ? { animate: { scale: [1, 1.025, 1] }, transition: { duration: 2.4, repeat: Infinity, ease: 'easeInOut' } } : {})}
     >
       {loud && !gone && (
-        // a shine that sweeps across every few seconds
-        <motion.span
-          aria-hidden
-          className="pointer-events-none absolute inset-y-0 -left-1/3 w-1/3 skew-x-[-20deg] bg-gradient-to-r from-transparent via-cream/35 to-transparent"
-          animate={{ x: ['0%', '450%'] }}
-          transition={{ duration: 1.1, repeat: Infinity, repeatDelay: 2.4, ease: 'easeInOut' }}
-        />
+        // a shine that sweeps across every few seconds (CSS: runs on the compositor)
+        <span aria-hidden className="pk-shine pointer-events-none absolute inset-y-0 -left-1/3 w-1/3 bg-gradient-to-r from-transparent via-cream/35 to-transparent" />
       )}
       <AnimatePresence>
         {taken && !gone && (
@@ -508,9 +507,9 @@ export function PromoBanner({ promo, left, href, loud = false, className = '' }:
         <motion.span key={'f' + taken.at} aria-hidden className="pointer-events-none absolute inset-0 rounded-3xl bg-[#e8b53a]" initial={{ opacity: 0.45 }} animate={{ opacity: 0 }} transition={{ duration: 0.9 }} />
       )}
       <div className="relative flex items-center gap-3">
-        <motion.span className="shrink-0" {...(loud && !gone ? { animate: { rotate: [0, -14, 12, -8, 0] }, transition: { duration: 0.9, repeat: Infinity, repeatDelay: 2.6 } } : {})}>
+        <span className={`inline-flex shrink-0 ${loud && !gone ? 'pk-wiggle' : ''}`}>
           <Gift className={`size-7 ${gone ? 'text-brown/40' : ''}`} />
-        </motion.span>
+        </span>
         <div className="min-w-0 flex-1">
           {loud && !gone && <span className="mb-1 inline-block rounded-full bg-[#e8b53a] px-2 py-0.5 font-display text-[0.65rem] font-bold uppercase tracking-wider text-brown">Terbatas · cepetan!</span>}
           <p className="font-display font-bold leading-tight">{gone ? `Promo ${promo.slots} pemesan pertama sudah habis` : `Promo ${promo.slots} pemesan pertama: potongan ${off}!`}</p>

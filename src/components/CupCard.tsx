@@ -4,6 +4,7 @@ import { RotateCw } from 'lucide-react'
 import { INGREDIENT_NOTES, type Drink } from '../data/menu'
 import { useMenu } from '../hooks/useMenu'
 import { pop, spring, stagger } from '../lib/motion'
+import { useLite } from '../lib/perf'
 import { ParticleField } from './ParticleField'
 import { PriceTag } from './PriceTag'
 import { Ornament } from './Ornament'
@@ -28,7 +29,11 @@ export function CupCard({ drink, index = 0, particles = true, className = '', so
   const ry = useSpring(useTransform(px, [-0.5, 0.5], [-12, 12]), spring.snappy)
   const cupX = useSpring(useTransform(px, [-0.5, 0.5], [-14, 14]), spring.glide)
 
+  const once = useLite()
+
+  // tilt follows a mouse only: a finger on the card is someone scrolling, and the springs would fight it
   const onMove = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType !== 'mouse') return
     const r = e.currentTarget.getBoundingClientRect()
     px.set((e.clientX - r.left) / r.width - 0.5)
     py.set((e.clientY - r.top) / r.height - 0.5)
@@ -52,7 +57,7 @@ export function CupCard({ drink, index = 0, particles = true, className = '', so
       className={`relative ${className}`}
       initial="hidden"
       whileInView="show"
-      viewport={{ once: false, amount: 0.35 }}
+      viewport={{ once, amount: 0.35 }}
       variants={stagger(0.1)}
     >
       <motion.div
@@ -73,13 +78,11 @@ export function CupCard({ drink, index = 0, particles = true, className = '', so
         data-track={`kartu-${drink.id}`}
       >
       <motion.div style={{ opacity: frontShown }} className="relative isolate overflow-hidden rounded-[2rem] border-2 border-brown/10 bg-[#fbf5ec] px-5 pb-6 pt-4 shadow-[0_20px_50px_-24px_rgb(90_46_26/0.45)] [backface-visibility:hidden] [-webkit-backface-visibility:hidden]">
-        {/* tinted glow */}
-        <motion.div
+        {/* tinted glow — breathes in CSS so it runs on the compositor, not the main thread */}
+        <div
           aria-hidden
-          className="absolute left-1/2 top-8 -z-10 size-96 -translate-x-1/2 rounded-full"
-          style={{ background: `radial-gradient(circle, ${drink.tint} 0%, transparent 65%)` }}
-          animate={{ scale: [1, 1.12, 1], opacity: [0.7, 1, 0.7] }}
-          transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut', delay: index * 0.6 }}
+          className="pk-glow absolute left-1/2 top-8 -z-10 size-96 -translate-x-1/2 rounded-full"
+          style={{ background: `radial-gradient(circle, ${drink.tint} 0%, transparent 65%)`, animationDelay: `${index * 0.6}s` }}
         />
         {particles && <ParticleField preset={drink.particle} className="-z-10" />}
         <Ornament variant="spice-star" className={`absolute top-4 size-10 opacity-70 ${flip ? 'left-4' : 'right-4'}`} />
@@ -88,9 +91,9 @@ export function CupCard({ drink, index = 0, particles = true, className = '', so
         <motion.div
           className={`relative mx-auto h-72 w-60 transition-[filter,opacity] duration-500 ${soldOut ? 'opacity-45 grayscale' : ''}`}
           style={{ x: cupX }}
-          animate={{ y: [0, -10, 0], rotate: [0, flip ? 1.5 : -1.5, 0] }}
-          transition={{ duration: 4.5, repeat: Infinity, ease: 'easeInOut', delay: index * 0.4 }}
         >
+          {/* the idle float, also CSS (compositor) */}
+          <div className="pk-float absolute inset-0" style={{ animationDelay: `${index * 0.4}s`, ['--pk-tilt' as string]: `${flip ? 1.5 : -1.5}deg` }}>
           <motion.img
             src={drink.image}
             alt={drink.name}
@@ -101,6 +104,7 @@ export function CupCard({ drink, index = 0, particles = true, className = '', so
               show: { y: 0, scale: 1, rotate: 0, opacity: 1, transition: { ...spring.pop, stiffness: 260, damping: 14 } },
             }}
           />
+          </div>
         </motion.div>
 
         <PriceTag price={drink.price} className="absolute right-4 top-56" delay={0.35} />

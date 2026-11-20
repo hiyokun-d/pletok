@@ -1,12 +1,15 @@
 import { motion } from 'motion/react'
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { LogoRig } from './LogoRig'
 import { ParticleField } from './ParticleField'
 import { ease } from '../lib/motion'
+import { isLite } from '../lib/perf'
 
 /** Entrance: a seed drops, the sprout grows in close-up, the camera pulls back and the logo blooms. */
 export function Intro({ onDone }: { onDone: () => void }) {
   const ref = useRef<HTMLDivElement>(null)
+  // the circle wipe repaints the whole screen each frame — a lite phone gets a plain fade
+  const [lite] = useState(isLite)
   // leave, and if the exit wipe never plays (Safari), get out of the way regardless
   const done = () => {
     onDone()
@@ -16,8 +19,8 @@ export function Intro({ onDone }: { onDone: () => void }) {
     <motion.div
       ref={ref}
       className="paper fixed inset-0 z-50 flex flex-col items-center justify-center overflow-hidden"
-      exit={{ clipPath: 'circle(0% at 50% 42%)', transition: { duration: 0.8, ease: ease.inOut } }}
-      initial={{ clipPath: 'circle(150% at 50% 42%)' }}
+      exit={lite ? { opacity: 0, transition: { duration: 0.45 } } : { clipPath: 'circle(0% at 50% 42%)', transition: { duration: 0.8, ease: ease.inOut } }}
+      initial={lite ? false : { clipPath: 'circle(150% at 50% 42%)' }}
       onClick={done}
     >
       <ParticleField preset="leaf" overrides={{ count: 14, travel: [20, 40], opacity: 0.5 }} />

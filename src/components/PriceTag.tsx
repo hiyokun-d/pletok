@@ -1,5 +1,6 @@
 import { motion } from 'motion/react'
 import { spring } from '../lib/motion'
+import { useLite } from '../lib/perf'
 import { Morph } from './Morph'
 
 interface PriceTagProps {
@@ -21,12 +22,13 @@ const SIZES = {
 /** Terracotta brush-stroke price badge from the poster. Pops in with overshoot, old price gets slashed. */
 export function PriceTag({ price, was, size = 'md', className = '', delay = 0 }: PriceTagProps) {
   const s = SIZES[size]
+  const once = useLite()
   return (
     <motion.div
       className={`flex items-center gap-3 ${className}`}
       initial="hidden"
       whileInView="show"
-      viewport={{ once: false, amount: 0.6 }}
+      viewport={{ once, amount: 0.6 }}
       variants={{ hidden: {}, show: { transition: { delayChildren: delay, staggerChildren: 0.25 } } }}
     >
       <motion.div

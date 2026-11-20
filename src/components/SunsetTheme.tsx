@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { usePath } from '../lib/nav'
 import { motion, useReducedMotion, useSpring, useTransform, type MotionValue } from 'motion/react'
 import { useMenu } from '../hooks/useMenu'
+import { useLite } from '../lib/perf'
 
 /*
  * "Neon Sunset" — the optional look for the screens customers see (menu, /cashier, /link), picked on
@@ -21,7 +22,8 @@ import { useMenu } from '../hooks/useMenu'
  *
  * Physics: one springy "wind" value moves trees, rays and dust. The pointer's speed pushes it, a tap
  * is a gust, a breeze comes every few seconds so the booth screen lives on its own. Nothing takes
- * taps (pointer-events off); prefers-reduced-motion gets one still frame.
+ * taps (pointer-events off); prefers-reduced-motion gets one still frame, and so does a lite phone
+ * (lib/perf.ts) — which also skips the lens layer, a full-screen blend over the scrolling page.
  */
 
 const PATHS = ['', '/link', '/cashier']
@@ -39,7 +41,8 @@ export function ThemeHost() {
 }
 
 function SunsetScene({ calm }: { calm: boolean }) {
-  const still = !!useReducedMotion()
+  const lite = useLite()
+  const still = !!useReducedMotion() || lite
   // the wind: -1 (blowing left) … 1 (right); a loose spring, so it overshoots and settles like air
   const wind = useSpring(0, { stiffness: 30, damping: 5, mass: 1.2 })
   // the pointer (0…1) and when it last moved — it casts a shadow through the beams while it's there
@@ -94,7 +97,7 @@ function SunsetScene({ calm }: { calm: boolean }) {
       </div>
       {/* over the page: only what light does to a lens and the air — beams, streak, ghosts, dust.
           No haze over everything: shadows stay dark, so the light reads as light */}
-      <div aria-hidden className={`pointer-events-none fixed inset-0 z-[5] overflow-hidden ${calm ? 'opacity-50' : ''}`}>
+      <div aria-hidden className={`pointer-events-none fixed inset-0 z-[5] overflow-hidden ${calm ? 'opacity-50' : ''} ${lite ? 'hidden' : ''}`}>
         <canvas ref={front} className="sunset-light absolute inset-0 h-full w-full" />
         <div className="sunset-grain absolute inset-0" />
       </div>

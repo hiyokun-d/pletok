@@ -1,6 +1,7 @@
 import { Component, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Geometry, Mesh, Program, Renderer } from 'ogl'
 import { PRESETS, type ParticlePreset, type PresetName } from './particlePresets'
+import { useLite } from '../lib/perf'
 
 const MAX_INSTANCES = 400
 const MAX_COLORS = 6
@@ -404,12 +405,14 @@ class ParticleBoundary extends Component<{ children: ReactNode }, { failed: bool
 /**
  * Each WebGL context is expensive, so a field only creates one while its area is on screen
  * (and a burst field only while a burst is actually playing). Off-screen → context released.
+ * Lite mode (cheap phones): none at all — a context costs those GPUs a visible hitch to create.
  */
 export function ParticleField(props: ParticleFieldProps) {
   const gateRef = useRef<HTMLDivElement>(null)
   const [onScreen, setOnScreen] = useState(false)
   const [bursting, setBursting] = useState(false)
   const isBurst = (props.overrides?.mode ?? PRESETS[props.preset].mode) === 'burst'
+  const lite = useLite()
 
   useEffect(() => {
     const io = new IntersectionObserver(([e]) => setOnScreen(e.isIntersecting), { rootMargin: '120px' })
@@ -422,7 +425,7 @@ export function ParticleField(props: ParticleFieldProps) {
     setBursting(true)
   }, [isBurst, props.burstKey])
 
-  const live = onScreen && (!isBurst || bursting)
+  const live = !lite && onScreen && (!isBurst || bursting)
   return (
     <div ref={gateRef} aria-hidden className={`pointer-events-none absolute inset-0 ${props.className ?? ''}`}>
       {live && (

@@ -1,6 +1,7 @@
 import { motion } from 'motion/react'
 import { drinkById, type Bundle } from '../data/menu'
 import { spring } from '../lib/motion'
+import { useLite } from '../lib/perf'
 import { PriceTag } from './PriceTag'
 import { SoldStamp } from './SoldStamp'
 import { Morph } from './Morph'
@@ -10,12 +11,13 @@ export function BundleCard({ bundle, index = 0, soldOut = false }: { bundle: Bun
   const cups = bundle.items.map(drinkById)
   const mid = (cups.length - 1) / 2
   const save = (bundle.normal - bundle.price) * 1000
+  const once = useLite()
 
   return (
     <motion.article
       initial="hidden"
       whileInView="show"
-      viewport={{ once: false, amount: 0.4 }}
+      viewport={{ once, amount: 0.4 }}
       variants={{ hidden: {}, show: { transition: { staggerChildren: 0.12 } } }}
       className="relative overflow-hidden rounded-[2rem] border-2 border-brown/10 bg-cream-deep/70 p-5 shadow-[0_16px_40px_-24px_rgb(90_46_26/0.5)]"
     >
@@ -23,7 +25,7 @@ export function BundleCard({ bundle, index = 0, soldOut = false }: { bundle: Bun
       <div className={`relative flex h-44 items-end justify-center transition-[filter,opacity] duration-500 ${soldOut ? 'opacity-45 grayscale' : ''}`}>
         <motion.div
           aria-hidden
-          className="absolute bottom-0 h-6 w-3/4 rounded-[50%] bg-brown/15 blur-md"
+          className="absolute bottom-0 h-8 w-[85%] rounded-[50%] bg-[radial-gradient(closest-side,rgb(90_46_26/0.18),transparent)]"
           variants={{ hidden: { scaleX: 0.3, opacity: 0 }, show: { scaleX: 1, opacity: 1, transition: spring.glide } }}
         />
         {cups.map((d, i) => (

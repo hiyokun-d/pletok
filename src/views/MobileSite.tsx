@@ -17,7 +17,8 @@ import { PromoBanner } from '../components/OrderTracker'
 import { useFeedbackOpen } from '../hooks/useFeedbackOpen'
 import { SignalBars } from '../components/SignalBars'
 import { Reveal, RevealItem } from '../components/Reveal'
-import { drop, ease, pop, spring } from '../lib/motion'
+import { drop, pop, spring } from '../lib/motion'
+import { blurFx, useLite } from '../lib/perf'
 
 function SectionTitle({ kicker, title }: { kicker: string; title: string }) {
   return (
@@ -54,6 +55,7 @@ export function MobileSite({ onEgg }: { onEgg: () => void }) {
   const logoScale = useTransform(heroP, [0, 1], [1, 0.85])
   const cupsY = useTransform(heroP, [0, 1], [0, 40])
   const barY = useSpring(useTransform(scrollY, [250, 400], [120, 0]), spring.snappy)
+  useLite() // re-render if the phone turns out to be slow, so the blur-free variants below take over
 
   return (
     <motion.main
@@ -64,8 +66,10 @@ export function MobileSite({ onEgg }: { onEgg: () => void }) {
     >
       <div className="pointer-events-none fixed inset-x-0 top-0 z-40 h-1">
         <motion.div className="h-full origin-left bg-gradient-to-r from-leaf to-terracotta" style={{ scaleX: progress }} />
-        <motion.div className="absolute -top-2.5 size-6" style={{ left: progressLeft, x: '-50%' }}>
-          <Ornament variant="leaf" className="size-6 rotate-90" draw={false} />
+        <motion.div className="absolute inset-x-0 -top-2.5 h-6 will-change-transform" style={{ x: progressLeft }}>
+          <div className="absolute left-0 top-0 size-6 -translate-x-1/2">
+            <Ornament variant="leaf" className="size-6 rotate-90" draw={false} />
+          </div>
         </motion.div>
       </div>
 
@@ -79,13 +83,13 @@ export function MobileSite({ onEgg }: { onEgg: () => void }) {
         {/* first-N promo, live — the first thing on the page while slots are left */}
         <AnimatePresence>
           {promoLive && poConfig.promo && (
-            <motion.div key="promo" className="relative z-20 mb-5 mt-4 w-full max-w-sm" initial={{ opacity: 0, y: -24, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.9, filter: 'blur(6px)' }} transition={{ ...spring.pop, delay: 0.4 }}>
+            <motion.div key="promo" className="relative z-20 mb-5 mt-4 w-full max-w-sm" initial={{ opacity: 0, y: -24, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.9, ...blurFx(6) }} transition={{ ...spring.pop, delay: 0.4 }}>
               <PromoBanner promo={poConfig.promo} left={promoLeft} href="/preorder" loud />
             </motion.div>
           )}
         </AnimatePresence>
 
-        <motion.div style={{ y: logoY, scale: logoScale }} initial="hidden" animate="show" variants={drop} className="relative mb-4 w-[min(84vw,400px)]">
+        <motion.div style={{ y: logoY, scale: logoScale }} initial="hidden" animate="show" variants={drop} className="relative mb-4 w-[min(84vw,400px)] will-change-transform">
           {/* every letter bounces, the leaf shakes & sheds leaves when tapped */}
           <LogoRig />
         </motion.div>
@@ -107,13 +111,13 @@ export function MobileSite({ onEgg }: { onEgg: () => void }) {
           transition={{ ...spring.pop, delay: 0.7 }}
           whileTap={{ scale: 0.92 }}
         >
-          <motion.span animate={{ rotate: [0, 20, -20, 0] }} transition={{ repeat: Infinity, duration: 1.6, repeatDelay: 1.4 }}>
+          <span className="pk-wiggle inline-flex">
             <Sparkles className="size-4" />
-          </motion.span>
+          </span>
           Kenapa namanya “Pletok”?
         </motion.button>
 
-        <motion.div style={{ y: cupsY }} className="relative mt-6 flex h-64 w-full max-w-sm items-end justify-center">
+        <motion.div style={{ y: cupsY }} className="relative mt-6 flex h-64 w-full max-w-sm items-end justify-center will-change-transform">
           {DRINKS.map((d, i) => {
             const off = i - 1
             return (
@@ -158,7 +162,7 @@ export function MobileSite({ onEgg }: { onEgg: () => void }) {
           animate={{ opacity: 1 }}
           transition={{ delay: 1.6 }}
         >
-          <motion.div className="mx-auto mt-1.5 size-1.5 rounded-full bg-brown/60" animate={{ y: [0, 14, 0] }} transition={{ repeat: Infinity, duration: 1.6, ease: ease.inOut }} />
+          <div className="pk-scroll-dot mx-auto mt-1.5 size-1.5 rounded-full bg-brown/60" />
         </motion.div>
       </section>
 
@@ -296,12 +300,12 @@ export function MobileSite({ onEgg }: { onEgg: () => void }) {
   )
 }
 
-/** a button that grows out of the dock and folds back into it */
-const morphIn = {
-  initial: { opacity: 0, scale: 0.4, filter: 'blur(8px)' },
-  animate: { opacity: 1, scale: 1, filter: 'blur(0px)' },
-  exit: { opacity: 0, scale: 0.4, filter: 'blur(8px)' },
-}
+/** a button that grows out of the dock and folds back into it (no blur on a lite phone) */
+const morphIn = () => ({
+  initial: { opacity: 0, scale: 0.4, ...blurFx(8) },
+  animate: { opacity: 1, scale: 1, ...blurFx(0) },
+  exit: { opacity: 0, scale: 0.4, ...blurFx(8) },
+})
 const DOCK = { type: 'spring', stiffness: 420, damping: 32, mass: 0.9 } as const
 
 /**
@@ -316,13 +320,13 @@ function ActionDock({ preorder, feedback }: { preorder: boolean; feedback: boole
     <motion.div layout transition={DOCK} className="relative flex items-center gap-1.5 bg-[#1a0d06] p-1.5 shadow-[0_14px_34px_-12px_rgb(0_0_0/0.55)]" style={{ borderRadius: 999 }}>
       <AnimatePresence mode="popLayout" initial={false}>
         {feedback && (
-          <motion.a key="feedback" layout href={FEEDBACK_URL} data-track="mobile-feedback" {...morphIn} transition={DOCK} whileTap={{ scale: 0.93 }} className={`${pill} bg-yakult px-5 text-brown`}>
+          <motion.a key="feedback" layout href={FEEDBACK_URL} data-track="mobile-feedback" {...morphIn()} transition={DOCK} whileTap={{ scale: 0.93 }} className={`${pill} bg-yakult px-5 text-brown`}>
             <MessageCircleHeart className="size-5 shrink-0" />
             <motion.span layout="position">{count > 2 ? 'Feedback' : 'Kasih feedback'}</motion.span>
           </motion.a>
         )}
         {preorder && (
-          <motion.a key="preorder" layout href="/preorder" data-track="mobile-preorder" {...morphIn} transition={DOCK} whileTap={{ scale: 0.93 }} className={`${pill} bg-terracotta px-5 text-cream`}>
+          <motion.a key="preorder" layout href="/preorder" data-track="mobile-preorder" {...morphIn()} transition={DOCK} whileTap={{ scale: 0.93 }} className={`${pill} bg-terracotta px-5 text-cream`}>
             <ShoppingBag className="size-5 shrink-0" />
             <motion.span layout="position">{count > 2 ? 'Pre-order' : 'Pre-order sekarang'}</motion.span>
           </motion.a>
@@ -342,7 +346,7 @@ function ActionDock({ preorder, feedback }: { preorder: boolean; feedback: boole
           <InstagramIcon className="size-5 shrink-0" />
           <AnimatePresence mode="popLayout" initial={false}>
             {count === 1 && (
-              <motion.span key="ig-label" layout="position" initial={{ opacity: 0, filter: 'blur(4px)' }} animate={{ opacity: 1, filter: 'blur(0px)' }} exit={{ opacity: 0, filter: 'blur(4px)' }}>
+              <motion.span key="ig-label" layout="position" initial={{ opacity: 0, ...blurFx(4) }} animate={{ opacity: 1, ...blurFx(0) }} exit={{ opacity: 0, ...blurFx(4) }}>
                 Follow {INSTAGRAM_HANDLE}
               </motion.span>
             )}

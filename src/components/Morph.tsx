@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
+import { blurFx } from '../lib/perf'
 
 /**
  * Text that changes like iOS numeric text: only the characters that differ roll — the old one
@@ -18,9 +19,9 @@ export function Morph({ text, className = '' }: { text: string | number; classNa
               <motion.span
                 key={c}
                 className="inline-block [text-decoration:inherit]"
-                initial={{ y: '60%', opacity: 0, scale: 0.8, filter: 'blur(6px)' }}
-                animate={{ y: '0%', opacity: 1, scale: 1, filter: 'blur(0px)' }}
-                exit={{ y: '-60%', opacity: 0, scale: 0.8, filter: 'blur(6px)' }}
+                initial={{ y: '60%', opacity: 0, scale: 0.8, ...blurFx(6) }}
+                animate={{ y: '0%', opacity: 1, scale: 1, ...blurFx(0) }}
+                exit={{ y: '-60%', opacity: 0, scale: 0.8, ...blurFx(6) }}
                 transition={{ type: 'spring', stiffness: 260, damping: 24, delay: (fromRight - 1) * 0.05 }}
               >
                 {c}
