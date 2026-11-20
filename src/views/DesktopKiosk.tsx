@@ -328,8 +328,44 @@ export function DesktopKiosk({ onEgg, preview = false, build = false, onBuilt }:
   const focus = manual ?? auto
   // focus-on-hover: null = nothing hovered, everything shown at full strength
   const [hoverDrink, setHoverDrink] = useState<number | null>(null)
+  // nobody at the screen for a while → it shows each drink up close in turn, until someone moves
+  const touring = useRef(false)
+  useEffect(() => {
+    let idle = 0
+    let step = 0
+    let n = 0
+    const stop = () => {
+      window.clearTimeout(idle)
+      window.clearInterval(step)
+      // only clear what the tour picked — a real hover stays
+      if (touring.current) setHoverDrink(null)
+      touring.current = false
+      idle = window.setTimeout(() => {
+        touring.current = true
+        const next = () => {
+          const live = menuRef.current.drinks.map((d, i) => (d.soldOut ? -1 : i)).filter((i) => i >= 0)
+          setHoverDrink(live.length ? live[n++ % live.length] : null)
+        }
+        next()
+        step = window.setInterval(next, 7000)
+      }, 25_000)
+    }
+    stop()
+    window.addEventListener('pointermove', stop, { passive: true })
+    window.addEventListener('pointerdown', stop, { passive: true })
+    window.addEventListener('keydown', stop)
+    return () => {
+      window.clearTimeout(idle)
+      window.clearInterval(step)
+      window.removeEventListener('pointermove', stop)
+      window.removeEventListener('pointerdown', stop)
+      window.removeEventListener('keydown', stop)
+    }
+  }, [])
   const [hoverBundle, setHoverBundle] = useState<number | null>(null)
   const menu = useMenu()
+  const menuRef = useRef(menu)
+  menuRef.current = menu
   const feedback = useFeedbackOpen().open
   const preorder = usePreorder().open
   const lastPointer = useRef(Date.now())
@@ -544,9 +580,9 @@ export function DesktopKiosk({ onEgg, preview = false, build = false, onBuilt }:
             </motion.header>
 
             {/* drink spotlight stage */}
-            <motion.section {...panelIn(0, 0.2)} className="absolute z-10 grid grid-cols-3 gap-[1.5vw]" style={{ left: gap, top: gap * 2 + headerH, width: mainW + gap, height: H - headerH - bundlesH - gap * 4 }}>
+            <motion.section {...panelIn(0, 0.2)} className={`absolute grid grid-cols-3 gap-[1.5vw] ${hoverDrink !== null ? 'z-20' : 'z-10'}`} style={{ left: gap, top: gap * 2 + headerH, width: mainW + gap, height: H - headerH - bundlesH - gap * 4 }}>
               {menu.drinks.map((d, i) => (
-                <DrinkSpotlight key={d.id} drink={d} soldOut={d.soldOut} active={hoverDrink === i} dimmed={hoverDrink !== null && hoverDrink !== i} onHover={(on) => setHoverDrink((h) => (on && !d.soldOut ? i : h === i ? null : h))} />
+                <DrinkSpotlight key={d.id} drink={d} side={i === menu.drinks.length - 1 ? 'left' : 'right'} soldOut={d.soldOut} active={hoverDrink === i} dimmed={hoverDrink !== null && hoverDrink !== i} onHover={(on) => setHoverDrink((h) => (on && !d.soldOut ? i : h === i ? null : h))} />
               ))}
             </motion.section>
 

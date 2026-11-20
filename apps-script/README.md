@@ -76,3 +76,25 @@ Nothing a customer sends is lost while the Sheet is down. The site keeps working
 2. "Exceeded maximum execution time" or quota errors: wait a few minutes. Google resets it.
 3. You changed Code.gs? Then **Deploy → Manage deployments → ✏️ → New version** (the URL stays the same).
 4. Still broken: tell customers on Instagram / WhatsApp to order via the admin's WhatsApp. Everything already queued lands by itself once it's fixed.
+
+## Event day: no internet at the booth (Plan B for BINUS wifi)
+
+BINUS wifi drowns once the hall fills up. The booth runs without it. Before 13.00:
+
+- **Every crew phone opens each crew page once on good signal** (/cashier, /pickup, /hasil, /financial, /config). After that the pages open from the phone's own cache, even with no signal.
+- **Crew phones use mobile data or a hotspot**, not BINUS wifi. One crew phone with a good data plan acts as the hotspot for the laptop.
+- **Don't change the crew PIN on event day.** Anything waiting in a phone's outbox is sealed with the old PIN and gets refused.
+- Bring a power bank for each phone, the laptop charger, and a paper notebook (last-resort log: time, name, items, payment).
+
+| Scenario | What the crew does | Where the data goes |
+|---|---|---|
+| Cashier phone offline | Sell as normal. Tunai ✓. QRIS ✓ — if the GoPay notification is late, check the buyer's success screen and tick "Notif telat". BCA only if someone can check the mutasi. | The sale is saved in the cashier phone's log and outbox; it reaches the Sheet by itself once there's signal (never twice). |
+| Pickup phone can't see a new sale | Scan the buyer's struk QR with **Scan struk** on /pickup. On iPhone: the Camera app → tap the link → **Tambahkan ke pickup**. | The struk QR carries the whole sale, sealed with the PIN — a tampered QR is shown in red. Whichever phone gets signal first delivers the sale to the Sheet. |
+| Pickup phone fully offline | Keep working: the queue shown is the last one loaded ("antrean per 14.05"). Taps on "Siap" / "Diambil" are kept on the phone. | Sent when the signal is back. |
+| Buyer forgot their B-number | Ask them to open **/struk** on their phone (the struk is saved there). Otherwise type what they remember into the search, combined: name · drink (lychee) · payment (qris) · time (14.10) · total (35rb). | — |
+| Buyer's struk won't load | It shows "Struk sementara" from the QR itself, with the temporary code (#0B6C) and the items. | Turns into the live struk once the Sheet answers. |
+| Everything is down | Paper notebook. Type it into /cashier afterwards. | — |
+
+### Money (Financial page)
+
+The /financial page keeps costs and the closing cash count as script properties `FINANCE` and `CLOSING` (no new tabs in the Sheet). After pulling this version of Code.gs: **Deploy → Manage deployments → ✏️ → New version**.

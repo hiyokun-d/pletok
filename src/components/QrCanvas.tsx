@@ -254,7 +254,8 @@ export function QrTexture({ cell = 18, className = '' }: { cell?: number; classN
         const breath = Math.sin(time * 0.8 + c.r * 12) * 0.5 + 0.5
         const level = Math.min(BUCKETS - 1, Math.floor((wave ** 3 * 0.75 + breath * 0.25) * BUCKETS))
         const s = cell * 0.7 * Math.min(appear, 1.1) * (0.9 + level * 0.04)
-        paths[level].roundRect(c.x + (cell - s) / 2, c.y + (cell - s) / 2, s, s, s * 0.32)
+        // our own roundRect: Path2D.roundRect only exists from Safari 16 (older iPhones threw here)
+        roundRect(paths[level], c.x + (cell - s) / 2, c.y + (cell - s) / 2, s, s, s * 0.32)
       }
       ctx.fillStyle = DECO
       paths.forEach((p, i) => {

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion } from 'motion/react'
-import { BellRing, CheckCircle2, ChefHat, CloudOff, Loader2, MapPin, MessageCircle, ReceiptText, XCircle } from 'lucide-react'
-import { fetchReceipt, type BoothReceipt } from '../lib/backend'
+import { BellRing, CheckCircle2, ChefHat, CloudOff, HandPlatter, Loader2, MapPin, MessageCircle, ReceiptText, ShieldAlert, XCircle } from 'lucide-react'
+import { crewPin, fetchReceipt, type BoothReceipt } from '../lib/backend'
+import { asReceipt, tempCode, unpack, verify } from '../lib/saleCode'
+import { holdSale } from '../lib/crewLocal'
 import { rupiah } from '../data/preorder'
 import { ADMIN_WA, adminChat } from '../data/event'
 import { hhmm } from './adminUi'
@@ -16,10 +18,15 @@ import { chime, unlockAudio } from '../lib/chime'
  *     open for that — there's no push server behind a Google Sheet.
  *   - Lost it? It's saved on this phone (/struk lists them), the cashier can show the QR again, and
  *     at pickup the B-number + name still works.
+ *   - No network / Sheet down: the QR also carries the sale itself (#s=…, sealed with the crew PIN),
+ *     so the struk still opens — marked "sementara" until the live one answers.
+ *   - Opened on a crew phone (the camera app scanned a buyer's struk): one tap puts the sale in this
+ *     phone's pickup queue and sends it to the Sheet — the offline hand-off between cashier and pickup.
  */
 
 const SAVED = 'pletok:receipts'
-type Saved = { id: string; code: string; at: number }
+/** `hash`: the sale packed in the QR, so a saved struk still opens with no network */
+type Saved = { id: string; code: string; at: number; hash?: string }
 export function savedReceipts(): Saved[] {
   try {
     return (JSON.parse(localStorage.getItem(SAVED) ?? '[]') as Saved[]).filter((s) => Date.now() - s.at < 3 * 86_400_000)
@@ -29,7 +36,8 @@ export function savedReceipts(): Saved[] {
 }
 function save(id: string, r: BoothReceipt) {
   try {
-    localStorage.setItem(SAVED, JSON.stringify([{ id, code: r.code, at: r.at }, ...savedReceipts().filter((s) => s.id !== id)].slice(0, 20)))
+    const hash = savedReceipts().find((s) => s.id === id)?.hash
+    localStorage.setItem(SAVED, JSON.stringify([{ id, code: r.code, at: r.at, hash }, ...savedReceipts().filter((s) => s.id !== id)].slice(0, 20)))
     localStorage.setItem(`${SAVED}:${id}`, JSON.stringify(r))
   } catch {
     /* storage blocked — the page still works while it's open */
@@ -44,7 +52,18 @@ function cached(id: string): BoothReceipt | null {
 }
 
 export function ReceiptPage({ id }: { id: string }) {
+  // the sale as the cashier packed it into the QR — read once, the hash stays as it was scanned
+  const [packed] = useState(() => unpack(id, window.location.hash))
   const [r, setR] = useState<BoothReceipt | null>(() => cached(id))
+  // keep it in /struk from the first look, even before the Sheet has heard of it
+  useEffect(() => {
+    if (!packed || savedReceipts().some((s) => s.id === id)) return
+    try {
+      localStorage.setItem(SAVED, JSON.stringify([{ id, code: tempCode(id), at: packed.at, hash: window.location.hash }, ...savedReceipts()].slice(0, 20)))
+    } catch {
+      /* storage blocked */
+    }
+  }, [id, packed])
   const [state, setState] = useState<'loading' | 'ok' | 'none' | 'offline'>('loading')
   const [now, setNow] = useState(Date.now())
   const [armed, setArmed] = useState(false)
@@ -115,6 +134,10 @@ export function ReceiptPage({ id }: { id: string }) {
     }
   }
 
+  // nothing live yet: the packed copy stands in (a temporary struk — it can't ring or tick as "live")
+  const temp = !r && packed && state !== 'loading' ? asReceipt(packed) : null
+  if (temp) return <TempReceipt r={temp} packed={packed!} />
+
   const step = !r ? 0 : r.status === 'done' ? 3 : r.status === 'ready' ? 2 : 1
   const clock = new Date(now).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', second: '2-digit' })
 
@@ -125,6 +148,7 @@ export function ReceiptPage({ id }: { id: string }) {
           <ReceiptText className="size-4" /> Struk Pletok
         </p>
 
+        {packed && crewPin() && <CrewAdd packed={packed} />}
         {!r ? (
           <div className="rounded-[2rem] border-2 border-dashed border-brown/15 p-8 text-center font-display">
             {state === 'none' ? (
@@ -266,7 +290,7 @@ export function SavedReceiptsPage() {
           <ul className="mt-4 flex flex-col gap-2">
             {list.map((s) => (
               <li key={s.id}>
-                <a href={`/r/${s.id}`} className="flex items-center justify-between rounded-3xl border-2 border-brown/15 bg-cream/80 p-4 font-display">
+                <a href={`/r/${s.id}${s.hash ?? ''}`} className="flex items-center justify-between rounded-3xl border-2 border-brown/15 bg-cream/80 p-4 font-display">
                   <span className="text-2xl font-bold text-terracotta">{s.code}</span>
                   <span className="font-cond italic text-brown-soft">{hhmm(s.at)} · buka →</span>
                 </a>
@@ -276,5 +300,101 @@ export function SavedReceiptsPage() {
         )}
       </div>
     </main>
+  )
+}
+
+/**
+ * The struk from the QR alone — the Sheet hasn't got (or can't give) the live one. Shown plainly as
+ * temporary: no live seal, no "siap" ring; the page keeps checking and turns into the real one.
+ */
+function TempReceipt({ r, packed }: { r: BoothReceipt; packed: NonNullable<ReturnType<typeof unpack>> }) {
+  return (
+    <main className="paper min-h-dvh px-4 pb-12 pt-6 text-brown">
+      <div className="mx-auto max-w-sm">
+        <p className="mb-3 flex items-center justify-center gap-2 font-cond text-sm font-semibold uppercase italic tracking-[0.25em] text-brown/55">
+          <ReceiptText className="size-4" /> Struk Pletok
+        </p>
+        {crewPin() && <CrewAdd packed={packed} />}
+        <section className="rounded-[2rem] bg-cream p-6 text-center">
+          <ChefHat className="mx-auto size-12 text-terracotta" />
+          <p className="mt-2 font-display text-6xl font-bold tracking-wide">{r.code}</p>
+          <p className="mt-2 font-display text-xl font-bold">Pesananmu tercatat di kasir</p>
+          <p className="mt-1 flex items-center justify-center gap-1 font-cond italic text-brown-soft"><MapPin className="size-4" /> Meja 9 · Balkon Lt. 2</p>
+        </section>
+        <p className="mt-3 flex items-start gap-2 rounded-2xl border-2 border-dashed border-[#e8b53a] bg-[#e8b53a]/15 px-4 py-3 font-display text-sm">
+          <CloudOff className="mt-0.5 size-4 shrink-0" />
+          <span>
+            <b>Struk sementara</b> — sinyal / sistem lagi gangguan. Halaman ini mengecek sendiri dan berubah jadi struk live begitu tersambung. Ambil pesanan dengan menyebut <b>{r.code}</b>
+            {r.name ? <> + nama <b>{r.name}</b></> : null}.
+          </span>
+        </p>
+        <section className="mt-4 rounded-[2rem] border border-brown/10 bg-cream/80 p-5 font-display">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="font-bold">{r.name ? `a.n. ${r.name}` : 'Pembeli booth'}</p>
+            <p className="font-cond text-sm italic text-brown-soft">{new Date(r.at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
+          </div>
+          <ul className="mt-3 flex flex-col gap-1.5 border-y-2 border-dashed border-brown/15 py-3">
+            {r.lines.map((l, i) => (
+              <li key={i} className="flex justify-between gap-3">
+                <span>{l.qty}× {l.name}</span>
+                <span className="tabular-nums">{rupiah(l.qty * l.price)}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-3 flex justify-between text-lg font-bold">
+            <span>Total</span>
+            <span className="tabular-nums">{rupiah(r.total)}</span>
+          </div>
+          <p className="mt-1 flex justify-between text-sm text-brown-soft">
+            <span>Dibayar</span>
+            <span>{r.pay} · Lunas</span>
+          </p>
+        </section>
+      </div>
+    </main>
+  )
+}
+
+/**
+ * A crew phone opened a buyer's struk (camera app → link): check the seal with this phone's PIN,
+ * then one tap adds it to /pickup here and queues it for the Sheet.
+ */
+function CrewAdd({ packed }: { packed: NonNullable<ReturnType<typeof unpack>> }) {
+  const pin = crewPin()!
+  const [seal, setSeal] = useState<'checking' | 'ok' | 'bad' | 'unsealed'>('checking')
+  const [added, setAdded] = useState(false)
+  useEffect(() => {
+    void verify(pin, packed).then(setSeal)
+  }, [pin, packed])
+  if (seal === 'checking') return null
+  if (seal === 'bad')
+    return (
+      <p role="alert" className="mb-3 flex items-start gap-2 rounded-2xl bg-terracotta p-4 font-display text-sm text-cream">
+        <ShieldAlert className="mt-0.5 size-5 shrink-0" /> <span><b>Segel struk tidak cocok.</b> QR ini bukan dari kasir Pletok atau isinya diubah — jangan serahkan, cek ke kasir.</span>
+      </p>
+    )
+  return (
+    <div className="mb-3 rounded-2xl bg-brown p-4 font-display text-cream">
+      <p className="flex items-center gap-2 font-bold"><HandPlatter className="size-5 text-yakult" /> HP crew</p>
+      <p className="mt-1 text-sm text-cream/80">
+        {seal === 'ok' ? 'Segel cocok — struk asli dari kasir.' : 'Tanpa segel (dibuat lewat http) — cocokkan isi & uangnya dengan kasir.'} Tambahkan ke antrean pickup di HP ini (jalan tanpa internet).
+      </p>
+      {added ? (
+        <a href="/pickup" className="mt-3 flex w-full items-center justify-center gap-2 rounded-full bg-leaf py-3 font-semibold">
+          <CheckCircle2 className="size-5" /> Masuk antrean — buka /pickup
+        </a>
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            holdSale(pin, packed)
+            setAdded(true)
+          }}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-full bg-yakult py-3 font-semibold text-brown"
+        >
+          <HandPlatter className="size-5" /> Tambahkan ke pickup
+        </button>
+      )}
+    </div>
   )
 }

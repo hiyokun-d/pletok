@@ -1,7 +1,8 @@
 import { AnimatePresence, motion, useAnimate } from 'motion/react'
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { Banknote, Check, CloudOff, Copy, Download, Gift, HardDrive, RefreshCw, Landmark, Loader2, Minus, Plus, QrCode, ReceiptText, RotateCcw, ShoppingBasket, TriangleAlert, X } from 'lucide-react'
-import { BACKEND, crewPin, fetchQueue, sendBoothOrder, voidBoothOrder, type BoothLine, type BoothPay, type QueueOrder } from '../lib/backend'
+import { BACKEND, crewPin, enqueue, fetchQueue, health, onHealth, sendBoothOrder, voidBoothOrder, type BoothLine, type BoothPay, type QueueOrder } from '../lib/backend'
+import { receiptUrl, tempCode, warmSeal, type PackedSale } from '../lib/saleCode'
 import { usePreorder } from '../hooks/usePreorder'
 import { useMenu } from '../hooks/useMenu'
 import { rupiah } from '../data/preorder'
@@ -63,8 +64,18 @@ export function CashierPage() {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // the sale just paid (or one re-opened from the history): its number + the receipt QR for the buyer
-  const [done, setDone] = useState<{ id: string; code: string; name: string; at: number; queued?: boolean; again?: boolean } | null>(null)
+  const [done, setDone] = useState<{ id: string; code: string; name: string; at: number; sale: PackedSale; queued?: boolean; again?: boolean } | null>(null)
   const [history, setHistory] = useState<QueueOrder[] | null>(null)
+  // the Sheet didn't answer the last history load — the list comes from this phone's own log
+  const [historyFailed, setHistoryFailed] = useState(false)
+  // offline / Sheet down: what still works at the till
+  const h = useSyncExternalStore(onHealth, health)
+  const cut = h.offline || h.down
+  // QRIS paid but the GoPay notification is late: checked on the buyer's success screen instead
+  const [qrisSeen, setQrisSeen] = useState(false)
+  useEffect(() => {
+    if (pin) warmSeal(pin)
+  }, [pin])
 
   const drinkOf = (id: string) => menu.drinks.find((d) => d.id === id)
   const lines: Line[] = Object.entries(cart)
@@ -83,6 +94,7 @@ export function CashierPage() {
   const cups = lines.reduce((n, i) => n + i.qty * i.drinks.length, 0)
   // the QR waits until the cashier stops tapping, so the buyer never scans a half-made bill —
   // until then it shimmers (its loading state) and builds itself the moment the total settles
+  const localLog = useSyncExternalStore(onLedger, ledger)
   const [qrTotal, setQrTotal] = useState(total)
   useEffect(() => {
     const t = window.setTimeout(() => setQrTotal(total), 350)
@@ -124,12 +136,14 @@ export function CashierPage() {
     setPay('tunai')
     setOrderId(newId())
     setError(null)
+    setQrisSeen(false)
   }
 
   const loadHistory = useCallback(async () => {
     if (!pin) return
     const r = await fetchQueue(pin)
     if (r === 'pin') return setPin(null), setWrong(true)
+    setHistoryFailed(!r)
     if (r) setHistory(r.filter((o) => o.src === 'booth').sort((a, b) => b.at - a.at))
   }, [pin])
   useEffect(() => {
@@ -145,19 +159,37 @@ export function CashierPage() {
     setError(null)
     const order: BoothLine[] = lines.map((i) => ({ id: i.key, name: i.name, qty: i.qty, price: i.price, drinks: i.drinks }))
     // on this phone first — whatever the Sheet does next, the sale exists
-    record({ id: orderId, at: Date.now(), lines: order, pay, name: name.trim(), total })
-    const r = await sendBoothOrder(pin, { id: orderId, lines: order, pay, name: name.trim(), note: '' })
+    const at = Date.now()
+    const note = pay === 'qris' && qrisSeen ? 'QRIS: dicek dari layar sukses pembeli (notif GoPay belum masuk)' : ''
+    record({ id: orderId, at, lines: order, pay, name: name.trim(), total })
+    const sale: PackedSale = { id: orderId, at, pay, name: name.trim(), lines: order }
+    const send = sendBoothOrder(pin, { id: orderId, lines: order, pay, name: name.trim(), note })
+    // slow festival wifi: the buyer doesn't stand there for a minute while it retries — after 6 s they
+    // get the struk with the temporary code, and the send carries on behind it
+    const r = await Promise.race([send, new Promise<'slow'>((res) => window.setTimeout(() => res('slow'), 6000))])
     setSending(false)
+    if (r === 'slow') {
+      const id = orderId
+      setDone({ id, code: tempCode(id), name: name.trim(), at: Date.now(), sale, queued: true })
+      reset()
+      void send.then((code) => {
+        if (!code || code === 'pin') return
+        markSent(id, code)
+        setDone((d) => (d?.id === id ? { ...d, code, queued: false } : d))
+        void loadHistory()
+      })
+      return
+    }
     if (r === 'pin') return setPin(null), setWrong(true)
     // Plan B: the Sheet didn't answer — the sale stays "pending" in this phone's log and goes in by
     // itself when it's back (same id → the Sheet never counts it twice). The buyer still gets served now.
     if (!r) {
-      setDone({ id: orderId, code: '#' + orderId.slice(0, 4).toUpperCase(), name: name.trim(), at: Date.now(), queued: true })
+      setDone({ id: orderId, code: tempCode(orderId), name: name.trim(), at: Date.now(), sale, queued: true })
       reset()
       return
     }
     markSent(orderId, r)
-    setDone({ id: orderId, code: r, name: name.trim(), at: Date.now() })
+    setDone({ id: orderId, code: r, name: name.trim(), at: Date.now(), sale })
     reset()
     void loadHistory()
   }
@@ -165,13 +197,40 @@ export function CashierPage() {
   if (!BACKEND) return <Shell><Empty title="Belum tersambung" text="VITE_BACKEND_URL belum diisi — lihat apps-script/README.md." /></Shell>
   if (!pin) return <Shell><PinGate title="Kasir Pletok" wrong={wrong} onOk={setPin} /></Shell>
 
-  const sold = (history ?? []).filter((o) => o.at > Date.now() - 18 * 3600_000)
+  // what the Sheet has + what's only on this phone so far: the till's numbers never stall on bad wifi
+  const local = localLog.filter((s) => s.state === 'pending' && !(history ?? []).some((o) => o.id === s.id)).map(
+    (s): QueueOrder & { local?: boolean } => ({ src: 'booth', id: s.id, code: tempCode(s.id), name: s.name, at: s.at, total: s.total, pay: s.pay === 'qris' ? 'QRIS' : s.pay === 'bca' ? 'Transfer BCA' : 'Tunai', note: '', done: false, lines: s.lines, local: true }),
+  )
+  // nothing from the Sheet at all yet: every sale this phone logged (sent ones included) stands in
+  const offlineList =
+    history === null && historyFailed
+      ? localLog.filter((s) => s.state !== 'void').map((s): QueueOrder & { local?: boolean } => ({ src: 'booth', id: s.id, code: s.code || tempCode(s.id), name: s.name, at: s.at, total: s.total, pay: s.pay === 'qris' ? 'QRIS' : s.pay === 'bca' ? 'Transfer BCA' : 'Tunai', note: '', done: false, lines: s.lines, local: s.state === 'pending' }))
+      : null
+  const shown = offlineList ?? (history ? [...local, ...history].sort((a, b) => b.at - a.at) : null)
+  const sold = (shown ?? []).filter((o) => o.at > Date.now() - 18 * 3600_000)
   const sum = (p: string) => sold.filter((o) => o.pay.toLowerCase() === p).reduce((t, o) => t + o.total, 0)
 
   return (
     <Shell>
       <CrewNav at="cashier" />
       <ParticleField preset="burst" overrides={{ shape: 'sparkle', count: 50 }} points={[[window.innerWidth / 2, window.innerHeight * 0.35]]} burstKey={done?.at} />
+
+      {/* no Sheet: the till keeps going — what works and how, in one place */}
+      <AnimatePresence initial={false}>
+        {cut && (
+          <motion.div key="cut" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+            <div className="mb-5 rounded-3xl border-2 border-[#e8b53a] bg-[#e8b53a]/15 p-4 font-display text-sm">
+              <p className="flex items-center gap-2 text-base font-bold"><CloudOff className="size-5" /> {h.offline ? 'HP ini offline' : 'Sheet tidak menjawab'} — kasir tetap jalan</p>
+              <ul className="mt-2 grid gap-1.5 sm:grid-cols-3">
+                <li><b>Tunai ✓</b> seperti biasa.</li>
+                <li><b>QRIS ✓</b> QR dibuat di HP ini. Pembeli butuh sinyal; cek notif GoPay di HP pemegang — telat? lihat layar sukses di HP pembeli (nama merchant, nominal, jam).</li>
+                <li><b>BCA</b> hanya kalau mutasi bisa dicek. Ragu → minta tunai/QRIS.</li>
+              </ul>
+              <p className="mt-2 text-brown-soft">Tiap penjualan tersimpan di HP ini & masuk Sheet sendiri nanti. Struk QR-nya membawa isi pesanan — <b>HP pickup tinggal scan</b> (kamera HP biasa juga bisa), tanpa internet.</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
         {/* ---- what's for sale: one tap = one more */}
@@ -380,6 +439,10 @@ export function CashierPage() {
                     <p className="text-center font-display text-3xl font-bold tabular-nums">{rupiah(total)}</p>
                     <QrisCode total={qrTotal || total} loading={qrTotal !== total || sending} className="mx-auto mt-2 max-w-72" />
                     <p className="mt-2 text-center font-cond text-sm italic text-cream/80">Tunggu notif "pembayaran masuk" {rupiah(total)} di GoPay Merchant, baru tekan lunas</p>
+                    {/* the notification can lag on a crowded network — the buyer's own success screen is the backup check */}
+                    <button type="button" onClick={() => setQrisSeen((v) => !v)} aria-pressed={qrisSeen} className={`mx-auto mt-2 flex items-center gap-1.5 rounded-full px-3 py-1.5 font-display text-xs font-semibold ${qrisSeen ? 'bg-yakult text-brown' : 'bg-cream/15 text-cream'}`}>
+                      {qrisSeen ? <Check className="size-3.5" /> : <TriangleAlert className="size-3.5" />} Notif telat — sudah cek layar sukses pembeli
+                    </button>
                   </div>
                 </motion.div>
               )}
@@ -411,7 +474,11 @@ export function CashierPage() {
       </div>
 
       <LocalLog pin={pin} onSynced={loadHistory} />
-      <History onReceipt={(o) => setDone({ id: o.id, code: o.code, name: o.name, at: Date.now(), again: true })} orders={history} pin={pin} total={{ tunai: sum('tunai'), qris: sum('qris'), bca: sum('transfer bca'), n: sold.length }} onChange={loadHistory} />
+      <History
+        onReceipt={(o) => setDone({ id: o.id, code: o.code, name: o.name, at: Date.now(), again: true, sale: { id: o.id, at: o.at, pay: /qris/i.test(o.pay) ? 'qris' : /bca/i.test(o.pay) ? 'bca' : 'tunai', name: o.name, lines: o.lines.map((l) => ({ ...l, drinks: l.drinks ?? [l.id] })) } })}
+        orders={shown}
+        offline={!!offlineList}
+        pin={pin} total={{ tunai: sum('tunai'), qris: sum('qris'), bca: sum('transfer bca'), n: sold.length }} onChange={loadHistory} />
 
       {/* the number to call out, big */}
       <AnimatePresence>
@@ -439,12 +506,12 @@ export function CashierPage() {
               {done.name && <p className="mt-2 font-display text-xl">a.n. {done.name}</p>}
               {done.queued && (
                 <p className="mt-3 rounded-2xl bg-[#e8b53a]/35 p-3 text-left font-display text-sm">
-                  Penjualan ini masuk ke Sheet otomatis begitu sistem pulih. <b>Layar pickup belum melihatnya</b> — sampaikan langsung ke barista & panggil pakai nama.
+                  Penjualan ini masuk ke Sheet otomatis begitu sistem pulih. <b>Layar pickup belum melihatnya</b> — HP pickup scan QR di bawah (atau sampaikan langsung ke barista & panggil pakai nama).
                 </p>
               )}
               {/* the receipt: the buyer scans, gets the live struk + a ring when it's ready */}
-              <div className="mx-auto mt-4 w-48 sm:w-56">
-                <LinkQr url={`${SITE_URL}/r/${done.id}`} />
+              <div className="mx-auto mt-4 w-52 sm:w-60">
+                <ReceiptQr pin={pin} sale={done.sale} />
               </div>
               <p className="mt-2 font-display text-sm font-semibold">Minta pembeli scan → struk + dikabari saat siap</p>
               <button type="button" onClick={() => setDone(null)} className="mt-5 w-full rounded-full bg-brown py-3 font-display font-semibold text-cream">
@@ -586,12 +653,30 @@ function SellTile({ item: i, n, index, onAdd }: { item: SellItem; n: number; ind
   )
 }
 
+/** the buyer's struk QR — the sale rides inside it (sealed with the crew PIN), so it opens and scans with no network */
+function ReceiptQr({ pin, sale }: { pin: string; sale: PackedSale }) {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    let live = true
+    void receiptUrl(SITE_URL, pin, sale).then((u) => live && setUrl(u))
+    return () => {
+      live = false
+    }
+  }, [pin, sale])
+  return url ? <LinkQr url={url} ecc="M" /> : <div className="grid aspect-square w-full place-items-center rounded-2xl bg-brown/5"><Loader2 className="size-6 animate-spin text-brown/40" /></div>
+}
+
 /** today's booth sales; a mistake can be cancelled (tap twice) until it's been picked up */
-function History({ orders, pin, total, onChange, onReceipt }: { onReceipt: (o: QueueOrder) => void; orders: QueueOrder[] | null; pin: string; total: { tunai: number; qris: number; bca: number; n: number }; onChange: () => void }) {
+function History({ orders, offline, pin, total, onChange, onReceipt }: { onReceipt: (o: QueueOrder) => void; orders: Array<QueueOrder & { local?: boolean }> | null; offline: boolean; pin: string; total: { tunai: number; qris: number; bca: number; n: number }; onChange: () => void }) {
   const [arm, setArm] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   return (
     <Card className="mt-8" title={<span className="flex items-center gap-2"><ReceiptText className="size-5 text-terracotta" /> Penjualan booth</span>} meta={`${total.n} transaksi · tunai ${rupiah(total.tunai)} · QRIS ${rupiah(total.qris)} · BCA ${rupiah(total.bca)}`}>
+      {offline && (
+        <p className="mb-3 flex items-center gap-2 rounded-2xl bg-[#e8b53a]/20 px-3 py-2 font-display text-sm">
+          <CloudOff className="size-4 shrink-0" /> Sheet belum terjangkau — daftar & total ini dari catatan HP ini saja
+        </p>
+      )}
       {!orders ? (
         <p className="flex items-center gap-2 font-cond italic text-brown/55"><Loader2 className="size-4 animate-spin" /> Memuat…</p>
       ) : !orders.length ? (
@@ -601,6 +686,7 @@ function History({ orders, pin, total, onChange, onReceipt }: { onReceipt: (o: Q
           {orders.slice(0, 30).map((o) => (
             <li key={o.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 font-display">
               <span className="w-16 font-bold text-terracotta">{o.code}</span>
+              {o.local && <span className="flex items-center gap-1 rounded-full bg-[#e8b53a]/35 px-2 py-0.5 text-xs font-semibold"><CloudOff className="size-3" /> di HP ini</span>}
               <span className="min-w-0 flex-1 truncate text-sm">
                 {o.lines.map((l) => `${l.qty}× ${l.name}`).join(', ')}
                 {o.name && <span className="text-brown-soft"> · {o.name}</span>}
@@ -619,7 +705,11 @@ function History({ orders, pin, total, onChange, onReceipt }: { onReceipt: (o: Q
                   onClick={async () => {
                     if (arm !== o.id) return setArm(o.id)
                     setBusy(o.id)
-                    if (await voidBoothOrder(pin, o.id)) markVoid(o.id)
+                    // never reached the Sheet: cancelling it here is enough (it won't be sent)
+                    if (o.local) markVoid(o.id)
+                    else if (await voidBoothOrder(pin, o.id)) markVoid(o.id)
+                    // no answer: cancelled here now, and the Sheet hears it when it's back
+                    else markVoid(o.id), void enqueue({ type: 'booth-void', pin, id: o.id })
                     setBusy(null)
                     setArm(null)
                     onChange()

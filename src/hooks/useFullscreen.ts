@@ -1,9 +1,21 @@
 import { useEffect, useState } from 'react'
 
-/** Toggle browser full-screen. Used by the crew panel button and the A + F shortcut. */
+type WebkitDoc = Document & { webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => void }
+type WebkitEl = HTMLElement & { webkitRequestFullscreen?: () => void }
+const fullEl = () => document.fullscreenElement ?? (document as WebkitDoc).webkitFullscreenElement ?? null
+
+/** Toggle browser full-screen. Used by the crew panel button and the A + F shortcut.
+ *  Safari on iPad only has the webkit- names, and iPhone has no page full-screen at all — never throw. */
 export function toggleFullscreen() {
-  if (document.fullscreenElement) void document.exitFullscreen()
-  else void document.documentElement.requestFullscreen().catch(() => {})
+  const d = document as WebkitDoc
+  const el = document.documentElement as WebkitEl
+  try {
+    if (fullEl()) void (d.exitFullscreen ? d.exitFullscreen().catch(() => {}) : d.webkitExitFullscreen?.())
+    else if (el.requestFullscreen) void el.requestFullscreen().catch(() => {})
+    else el.webkitRequestFullscreen?.()
+  } catch {
+    /* not available here (iPhone) */
+  }
 }
 
 /**
@@ -11,13 +23,17 @@ export function toggleFullscreen() {
  * dims or sleeps. The browser drops the lock whenever the tab is hidden, so it's re-taken on return.
  */
 export function useFullscreen() {
-  const [full, setFull] = useState(() => !!document.fullscreenElement)
+  const [full, setFull] = useState(() => !!fullEl())
   const [awake, setAwake] = useState(false)
 
   useEffect(() => {
-    const onChange = () => setFull(!!document.fullscreenElement)
+    const onChange = () => setFull(!!fullEl())
     document.addEventListener('fullscreenchange', onChange)
-    return () => document.removeEventListener('fullscreenchange', onChange)
+    document.addEventListener('webkitfullscreenchange', onChange)
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange)
+      document.removeEventListener('webkitfullscreenchange', onChange)
+    }
   }, [])
 
   useEffect(() => {

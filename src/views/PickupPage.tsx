@@ -1,7 +1,9 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, BellOff, BellRing, Check, CupSoda, Focus, HandPlatter, KeyRound, LayoutGrid, Loader2, RotateCcw, Search, ShieldAlert, ShieldCheck, StickyNote, UserRoundCheck, WifiOff } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { Bell, BellOff, BellRing, Check, CloudOff, CupSoda, Focus, HandPlatter, KeyRound, LayoutGrid, Loader2, RotateCcw, ScanLine, Search, ShieldAlert, ShieldCheck, StickyNote, UserRoundCheck, WifiOff } from 'lucide-react'
 import { BACKEND, crewPin, enqueue, fetchQueue, markPickedUp, markReady, pickUpPreorder, proofMatches, type QueueOrder } from '../lib/backend'
+import { cachedQueue, forgetSales, localSales, marks, onCrewLocal, saveQueue, setMark, settleMarks } from '../lib/crewLocal'
+import { ScanStruk } from '../components/ScanStruk'
 import { PREORDER_ITEMS } from '../data/preorder'
 import { DRINKS } from '../data/menu'
 import { CrewNav, Empty, PinGate, Shell, hhmm, useCrewPage } from './adminUi'
@@ -18,6 +20,10 @@ import { chime, unlockAudio } from '../lib/chime'
  * in the tab title when the screen is elsewhere) — switched on with the bell, since a browser only
  * plays sound after a tap. "Mode fokus" hides the board: one big number box → that one order →
  * its proof, with "Cek ulang" to check again, for the person standing at the counter.
+ *
+ * Without the Sheet (no signal, Apps Script down) it keeps going on what this phone knows
+ * (lib/crewLocal): the last queue it loaded, booth sales scanned off a buyer's struk QR or rung up
+ * on /cashier on this same phone, and its own taps — all sent to the Sheet once it answers.
  */
 
 const REFRESH_MS = 5_000
@@ -42,14 +48,45 @@ type Filter = 'all' | 'po' | 'booth'
 
 /** the cups an order line takes to make — bundles count each drink in them */
 const cupsOf = (l: QueueOrder['lines'][number]) => l.drinks?.length ? l.drinks : PREORDER_ITEMS.find((i) => i.id === l.id)?.drinks ?? []
+/** a cheap fingerprint of this phone's own records, for useSyncExternalStore */
+const localSnap = () => {
+  try {
+    return `${localStorage.getItem('pletok:crew-sales')}|${localStorage.getItem('pletok:pickup-marks')}|${localSales().map((o) => o.id).join()}`
+  } catch {
+    return ''
+  }
+}
+const plain = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+
+/** one word of a "lupa nomor" search against an order: name, code, drinks, payment, time or total */
+function fits(o: QueueOrder, w: string) {
+  // "35rb" / "35k" / "35.000" → the total (in thousands)
+  const money = w.match(/^(\d{1,3})(?:rb|k|\.000)$/)
+  if (money) return o.total === Number(money[1])
+  // "14.10" / "14:10" → ordered within 6 minutes of that time
+  const time = w.match(/^(\d{1,2})[.:](\d{2})$/)
+  if (time) {
+    const [h, m] = hhmm(o.at).split(/[.:]/).map(Number)
+    return Math.abs(h * 60 + m - (Number(time[1]) * 60 + Number(time[2]))) <= 6
+  }
+  const hay = plain([o.name, o.code, o.pay, ...o.lines.map((l) => l.name), ...o.lines.flatMap(cupsOf).map((d) => DRINKS.find((x) => x.id === d)?.short ?? d)].join(' '))
+  return hay.includes(plain(w))
+}
+
+
 const minutesAgo = (at: number) => Math.max(0, Math.round((Date.now() - at) / 60_000))
 
 export function PickupPage() {
   const [pin, setPin] = useState(crewPin)
   const [wrong, setWrong] = useState(false)
   useCrewPage('Pickup')
-  const [orders, setOrders] = useState<QueueOrder[] | null>(null)
+  // the last queue this phone saw opens instantly (and is all there is while offline)
+  const [orders, setOrders] = useState<QueueOrder[] | null>(() => cachedQueue()?.orders ?? null)
+  const [loadedAt, setLoadedAt] = useState(() => cachedQueue()?.at ?? 0)
   const [offline, setOffline] = useState(false)
+  const [scan, setScan] = useState(false)
+  // scanned sales, this phone's cashier log and its own taps — re-render when any of them change
+  const localVer = useSyncExternalStore(onCrewLocal, localSnap)
   const [filter, setFilter] = useState<Filter>('all')
   const [q, setQ] = useState('')
   // taps not confirmed by the Sheet yet: id → done
@@ -117,6 +154,10 @@ export function PickupPage() {
     if (r === 'pin') return setPin(null), setWrong(true)
     setOffline(!r)
     if (!r) return
+    saveQueue(r)
+    setLoadedAt(Date.now())
+    settleMarks(r)
+    forgetSales(new Set(r.map((o) => o.id)))
     if (seen.current) {
       const added = r.filter((o) => !o.done && !seen.current!.has(o.id))
       if (added.length) setFresh((f) => new Set([...f, ...added.map((o) => o.id)]))
@@ -132,14 +173,31 @@ export function PickupPage() {
     return () => window.clearInterval(t)
   }, [load])
 
-  const all = useMemo(() => (orders ?? []).map((o) => (o.id in pending ? { ...o, done: pending[o.id] } : o)), [orders, pending])
+  // the Sheet's list + sales only this phone has, with this phone's taps laid over both
+  const all = useMemo(() => {
+    void localVer // re-run when this phone's own records change
+    const sheet = orders ?? []
+    const ids = new Set(sheet.map((o) => o.id))
+    const m = marks()
+    return [...sheet, ...localSales().filter((o) => !ids.has(o.id))].map((o) => {
+      const t = m[o.id]
+      const x = t ? { ...o, done: t.done ?? o.done, ready: o.ready || !!t.ready, readyAt: o.readyAt || (t.ready ? t.at : 0), pickedBy: t.by ?? o.pickedBy } : o
+      return o.id in pending ? { ...x, done: pending[o.id] } : x
+    })
+  }, [orders, pending, localVer])
+  /** a sale the Sheet hasn't seen: its own record goes first, so the tap that follows has something to land on */
+  const deliver = (o: QueueOrder) => {
+    if (!pin || (orders ?? []).some((x) => x.id === o.id)) return
+    void enqueue({ type: 'booth-order', pin, id: o.id, lines: o.lines, pay: /qris/i.test(o.pay) ? 'qris' : /bca/i.test(o.pay) ? 'bca' : 'tunai', name: o.name, note: '' })
+  }
   const match = (o: QueueOrder) => {
     if (filter !== 'all' && o.src !== filter) return false
     const t = q.trim().toLowerCase()
     if (!t) return true
-    // "7" or "007" → the code number, anything else → the name
+    // "7" or "007" → the code number
     if (/^\d{1,4}$/.test(t)) return Number(o.code.replace(/\D/g, '')) === Number(t)
-    return o.name.toLowerCase().includes(t) || o.code.toLowerCase().includes(t)
+    // forgot the number? describe it instead — every word has to fit: "sinta lychee qris 14.10 35rb"
+    return t.split(/\s+/).every((w) => fits(o, w))
   }
   const waiting = all.filter((o) => !o.done && match(o)).sort((a, b) => a.at - b.at)
   const handed = all.filter((o) => o.done && match(o)).sort((a, b) => b.at - a.at).slice(0, 12)
@@ -151,9 +209,15 @@ export function PickupPage() {
   const call = async (o: QueueOrder) => {
     if (!pin) return
     setCalling((c) => new Set(c).add(o.id))
+    setMark(o.id, { ready: true })
     const ok = await markReady(pin, o.id)
     if (ok) setOrders((os) => os?.map((x) => (x.id === o.id ? { ...x, ready: true, readyAt: Date.now() } : x)) ?? os)
-    else setAlert(`${o.code}: gagal memanggil (sinyal?) — panggil pakai suara, lalu coba lagi.`)
+    else {
+      // the buyer's phone can't hear us right now anyway — call it out loud; the Sheet gets it later
+      deliver(o)
+      void enqueue({ type: 'pickup', pin, src: 'booth', id: o.id, ready: true })
+      setAlert(`${o.code}: sinyal putus — panggil pakai suara ("${o.name || o.code}"). Tercatat & dikirim otomatis nanti.`)
+    }
     setCalling((c) => {
       const n = new Set(c)
       n.delete(o.id)
@@ -169,14 +233,20 @@ export function PickupPage() {
       n.delete(o.id)
       return n
     })
+    // remembered on this phone first — a reload or a dead network can't undo a hand-over
+    setMark(o.id, { done })
     const ok = await markPickedUp(pin, o.src, o.id, done)
     if (ok) setOrders((os) => os?.map((x) => (x.id === o.id ? { ...x, done } : x)) ?? os)
+    else {
+      deliver(o)
+      void enqueue({ type: 'pickup', pin, src: o.src, id: o.id, done })
+      setOffline(true)
+    }
     setPending((p) => {
       const n = { ...p }
       delete n[o.id]
       return n
     })
-    if (!ok) setOffline(true)
   }
 
   if (!BACKEND) return <Shell><Empty title="Belum tersambung" text="VITE_BACKEND_URL belum diisi — lihat apps-script/README.md." /></Shell>
@@ -195,9 +265,12 @@ export function PickupPage() {
         <div className="flex flex-wrap items-center gap-2">
           {offline && (
             <span className="flex items-center gap-1.5 rounded-full bg-terracotta/10 px-3 py-1 font-cond text-sm italic text-terracotta">
-              <WifiOff className="size-4" /> Sinyal putus
+              <WifiOff className="size-4" /> Sinyal putus{loadedAt ? ` · antrean per ${hhmm(loadedAt)}` : ''}
             </span>
           )}
+          <button type="button" onClick={() => setScan(true)} className="flex items-center gap-1.5 rounded-full border-2 border-brown/15 px-3.5 py-2 font-display text-sm font-semibold">
+            <ScanLine className="size-4" /> Scan struk
+          </button>
           <button
             type="button"
             onClick={() => void toggleSound()}
@@ -257,6 +330,18 @@ export function PickupPage() {
         )}
       </AnimatePresence>
 
+      <ScanStruk
+        open={scan}
+        pin={pin}
+        onClose={() => setScan(false)}
+        onFound={(id, code) => {
+          setScan(false)
+          // already in the Sheet → its real number; otherwise the temporary one
+          setQ((orders ?? []).find((o) => o.id === id)?.code ?? code)
+          setFocus(false)
+        }}
+      />
+
       {focus ? (
         <FocusDesk
           orders={orders ? all : null}
@@ -264,7 +349,7 @@ export function PickupPage() {
           pin={pin}
           onAlert={setAlert}
           onBooth={(o) => mark(o, true)}
-          onDone={(id, by, done) => setOrders((os) => os?.map((x) => (x.id === id ? { ...x, done, pickedBy: by } : x)) ?? os)}
+          onDone={(id, by, done) => (setMark(id, { done, by }), setOrders((os) => os?.map((x) => (x.id === id ? { ...x, done, pickedBy: by } : x)) ?? os))}
         />
       ) : (
         <>
@@ -291,7 +376,7 @@ export function PickupPage() {
       <div className="sticky top-0 z-30 -mx-4 mb-5 flex flex-wrap gap-2 bg-cream/95 px-4 py-2 backdrop-blur sm:static sm:mx-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
         <label className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl bg-cream-deep/80 px-3.5 py-3 focus-within:ring-2 focus-within:ring-terracotta">
           <Search className="size-5 text-brown-soft" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nomor (007) atau nama" inputMode="search" className="w-full bg-transparent font-display text-lg outline-none" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nomor (007) — atau nama, minuman, jam, total" inputMode="search" className="w-full bg-transparent font-display text-lg outline-none" />
         </label>
         <div className="grid grid-cols-3 gap-1 rounded-2xl bg-brown/10 p-1">
           {(
@@ -337,6 +422,11 @@ export function PickupPage() {
                       <span className={`rounded-full px-2.5 py-1 font-display text-xs font-semibold ${o.src === 'po' ? 'bg-leaf text-cream' : 'bg-brown text-cream'}`}>
                         {o.src === 'po' ? 'Pre-order' : `Kasir · ${o.pay}`}
                       </span>
+                      {'via' in o && (
+                        <span className="mt-1 flex items-center justify-end gap-1 font-cond text-xs italic text-brown-soft">
+                          <CloudOff className="size-3" /> {o.via === 'scan' ? 'dari scan struk' : 'dari kasir HP ini'} · belum di Sheet
+                        </span>
+                      )}
                       <p className="mt-1.5 font-cond text-sm italic text-brown/55">
                         {hhmm(o.at)}
                         {o.src === 'booth' && ` · ${minutesAgo(o.at)} mnt`}
@@ -365,7 +455,7 @@ export function PickupPage() {
                     </p>
                   )}
                   {o.src === 'po' ? (
-                    <HandOver order={o} pin={pin} onAlert={setAlert} onDone={(by, done) => setOrders((os) => os?.map((x) => (x.id === o.id ? { ...x, done, pickedBy: by } : x)) ?? os)} />
+                    <HandOver order={o} pin={pin} onAlert={setAlert} onDone={(by, done) => (setMark(o.id, { done, by }), setOrders((os) => os?.map((x) => (x.id === o.id ? { ...x, done, pickedBy: by } : x)) ?? os))} />
                   ) : (
                     <>
                       {o.ref && (
@@ -406,6 +496,7 @@ export function PickupPage() {
               {q ? 'Nggak ada yang cocok — cek lagi nomornya.' : 'Antrean kosong. Santai dulu 🍹'}
             </motion.p>
           )}
+          {q.trim() && waiting.length !== 1 && <ForgotCode />}
 
           {handed.length > 0 && (
             <section className="mt-8">
@@ -761,5 +852,19 @@ function FocusDesk({
         )}
       </AnimatePresence>
     </div>
+  )
+}
+
+/** a buyer who forgot their number still gets their drink — what to ask, in order */
+function ForgotCode() {
+  return (
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mt-4 rounded-3xl bg-[#e8b53a]/20 p-4 font-display text-sm text-brown">
+      <p className="flex items-center gap-2 font-bold"><KeyRound className="size-4 text-terracotta" /> Pembeli lupa nomornya?</p>
+      <ol className="mt-2 flex list-decimal flex-col gap-1 pl-5">
+        <li>Minta buka <b>pletok…/struk</b> di HP-nya — struk tersimpan di sana, nomor paling atas.</li>
+        <li>Ketik apa yang dia ingat, digabung: <b>nama</b> · <b>minumannya</b> (lychee) · <b>bayar pakai</b> (qris) · <b>jam</b> (14.10) · <b>total</b> (35rb).</li>
+        <li>Masih ragu? Cocokkan <b>isi pesanan + cara bayar</b> dengan yang dia sebut, lalu tanya kasir — kasir ingat wajahnya.</li>
+      </ol>
+    </motion.div>
   )
 }

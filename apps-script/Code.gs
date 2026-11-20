@@ -10,6 +10,10 @@
  *   POST {type:'preorder-status', pin, id, status?, sent?} → verify (hands out PLT-001, PLT-002…), picked up, rejected
  *   POST {type:'preorder-pay', id, pay:'BCA'|'QRIS'} → how the customer is paying (only while on hold)
  *   POST {type:'money-holders', pin, money:{bca,qris,tunai}} → who holds each pot of money (/hasil)
+ *   POST {type:'finance', pin, finance} → costs, HPP, target and crew for /financial (script property FINANCE)
+ *   POST {type:'closing', pin, pot, counted, by} → the money actually counted in one pot at closing (CLOSING)
+ *   POST {type:'finance-report', pin, title, sections} → the financial report as a Google Doc in Drive
+ *     (none of the finance data gets a tab of its own — the Sheet stays as it is)
  *   POST {type:'preorder-proof', id, image} → the transfer screenshot into Drive, named after the customer
  *   POST {type:'preorder-proof-get', pin, id} → that screenshot, for /hasil
  *   POST {type:'wipe', pin, what:['orders','booth','feedback','scans','security','proofs']} → clear test data (backs up first)
@@ -93,6 +97,17 @@ function moneyHolders_() {
 const normProof_ = (t) => String(t || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
 const sha_ = (t) => Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, t, Utilities.Charset.UTF_8).map((b) => ('0' + (b & 255).toString(16)).slice(-2)).join('')
 const nextCode_ = (rows) => 'PLT-' + ('00' + (rows.reduce((m, r) => Math.max(m, Number((String(r[1]).match(/(\d+)$/) || [])[1]) || 0), 0) + 1)).slice(-3)
+
+// /financial: costs & crew (FINANCE) and the closing count per pot (CLOSING) — script properties,
+// never a tab, so the Sheet looks exactly the same to everyone reading it
+const prop_ = (k) => {
+  const raw = PropertiesService.getScriptProperties().getProperty(k)
+  try {
+    return raw ? JSON.parse(raw) : null
+  } catch (err) {
+    return null
+  }
+}
 
 /* ---- proof of transfer: screenshots go into one Drive folder, renamed after the customer */
 function proofFolder_() {
@@ -376,6 +391,45 @@ function doPost(e) {
       return json_({ ok: true })
     }
 
+    // /financial: the whole cost sheet at once (small — a property holds 9 KB)
+    if (b.type === 'finance') {
+      if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
+      const raw = JSON.stringify(b.finance || {})
+      if (raw.length > 8500) return json_({ ok: false, error: 'size' })
+      props.setProperty('FINANCE', raw)
+      return json_({ ok: true })
+    }
+    // /financial closing: one pot at a time, so two holders counting at once never overwrite each other
+    if (b.type === 'closing') {
+      if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
+      if (['tunai', 'bca', 'qris'].indexOf(String(b.pot)) === -1) return json_({ ok: false, error: 'input' })
+      const c = prop_('CLOSING') || {}
+      const n = Math.round(Number(b.counted))
+      if (b.counted === null || b.counted === '') delete c[b.pot]
+      else if (!(n >= 0) || n > 1e9) return json_({ ok: false, error: 'input' })
+      else c[b.pot] = { counted: n, by: clip_(b.by, 60).trim(), at: now.getTime() }
+      props.setProperty('CLOSING', JSON.stringify(c))
+      return json_({ ok: true, closing: c })
+    }
+    // /financial: the report as a Google Doc (Drive, not the Sheet) — the page sends the finished tables
+    if (b.type === 'finance-report') {
+      if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
+      const doc = DocumentApp.create(clip_(b.title, 120) || 'Pletok — Laporan Keuangan')
+      const body = doc.getBody()
+      body.appendParagraph(clip_(b.title, 120) || 'Pletok — Laporan Keuangan').setHeading(DocumentApp.ParagraphHeading.TITLE)
+      ;(Array.isArray(b.sections) ? b.sections : []).slice(0, 20).forEach((sec) => {
+        body.appendParagraph(clip_(sec.heading, 120)).setHeading(DocumentApp.ParagraphHeading.HEADING1)
+        if (sec.note) body.appendParagraph(clip_(sec.note, 500)).setItalic(true)
+        const rows = (Array.isArray(sec.rows) ? sec.rows : []).slice(0, 200).map((r) => (Array.isArray(r) ? r : []).slice(0, 8).map((c) => clip_(c, 200)))
+        if (rows.length) {
+          const t = body.appendTable(rows)
+          for (let c = 0; c < rows[0].length; c++) t.getCell(0, c).editAsText().setBold(true)
+        }
+      })
+      doc.saveAndClose()
+      return json_({ ok: true, url: doc.getUrl() })
+    }
+
     // admin (/hasil): what's on sale, prices, open/closed, cut-off
     if (b.type === 'preorder-config') {
       if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
@@ -621,6 +675,8 @@ function doPost(e) {
         ok: true,
         sheetUrl: ss.getUrl(),
         money: moneyHolders_(),
+        finance: prop_('FINANCE'),
+        closing: prop_('CLOSING') || {},
         security: secRows.reverse().map((r) => ({ at: new Date(r[0]).getTime(), what: String(r[1]), from: String(r[2]), ua: String(r[3]), detail: String(r[4]) })),
         responses: rows.map((r) => ({
           at: new Date(r[0]).getTime(), rating: Number(r[2]) || null, favorites: String(r[3]),

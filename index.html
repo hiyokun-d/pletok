@@ -89,17 +89,71 @@
       <p><a href="https://www.instagram.com/pletok._/">Instagram @pletok._</a></p>
     </noscript>
     <div id="root"></div>
+    <!-- the loading state: plain HTML + CSS, so it's on screen before a single script has arrived.
+         A cup fills while the app downloads; on slow wifi it says so, and offers a reload. main.tsx fades it out. -->
+    <div id="boot" role="status" aria-live="polite">
+      <svg class="boot-cup" viewBox="0 0 64 80" aria-hidden="true">
+        <defs><clipPath id="boot-in"><path d="M12 18h40l-5 54a6 6 0 0 1-6 5H23a6 6 0 0 1-6-5z" /></clipPath></defs>
+        <g clip-path="url(#boot-in)"><rect class="boot-fill" x="0" y="18" width="64" height="62" /><path class="boot-wave" d="M-64 0q8-4 16 0t16 0 16 0 16 0 16 0 16 0 16 0 16 0v12h-128z" /></g>
+        <path d="M12 18h40l-5 54a6 6 0 0 1-6 5H23a6 6 0 0 1-6-5z" class="boot-glass" />
+        <path d="M8 18h48" class="boot-glass" />
+        <path class="boot-leaf" d="M33 15c-1-7 3-12 10-13 0 7-4 12-10 13z" />
+      </svg>
+      <p class="boot-name">Pletok</p>
+      <p class="boot-msg" id="boot-msg">Menyiapkan…</p>
+      <button type="button" id="boot-retry" hidden onclick="location.reload()">Muat ulang</button>
+    </div>
+    <style>
+      #boot { position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+        background: #f5ebdd; color: #5a2e1a; font: 600 15px/1.4 ui-rounded, system-ui, -apple-system, 'Segoe UI', sans-serif; transition: opacity .35s ease, visibility .35s; }
+      #boot.gone { opacity: 0; visibility: hidden; pointer-events: none; }
+      #boot[data-theme='sunset'] { background: #1d1430; color: #ffd9b0; }
+      .boot-cup { width: 56px; height: 70px; overflow: visible; }
+      .boot-glass { fill: none; stroke: currentColor; stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+      .boot-fill { fill: #a8572a; transform-origin: 0 80px; animation: boot-fill 2.4s cubic-bezier(.45,.05,.3,1) infinite; }
+      .boot-wave { fill: #a8572a; animation: boot-fill-wave 2.4s cubic-bezier(.45,.05,.3,1) infinite, boot-slosh 1.2s linear infinite; }
+      #boot[data-theme='sunset'] .boot-fill, #boot[data-theme='sunset'] .boot-wave { fill: #ff7a59; }
+      .boot-leaf { fill: #5e7b3a; transform-origin: 33px 15px; animation: boot-sway 2.4s ease-in-out infinite; }
+      .boot-name { margin: 8px 0 0; font-size: 22px; font-weight: 800; letter-spacing: .02em; }
+      .boot-msg { margin: 0; min-height: 1.4em; max-width: 18rem; text-align: center; font-weight: 500; opacity: .75; }
+      #boot-retry { margin-top: 10px; border: 0; border-radius: 999px; padding: 10px 20px; background: #a8572a; color: #f5ebdd; font: inherit; font-weight: 700; cursor: pointer; }
+      @keyframes boot-fill { 0% { transform: scaleY(0) } 70%, 100% { transform: scaleY(1) } }
+      @keyframes boot-fill-wave { 0% { transform: translateY(80px) } 70%, 100% { transform: translateY(18px) } }
+      @keyframes boot-slosh { from { translate: 0 0 } to { translate: 32px 0 } }
+      @keyframes boot-sway { 0%, 100% { rotate: -6deg } 50% { rotate: 8deg } }
+      @media (prefers-reduced-motion: reduce) { .boot-fill, .boot-wave, .boot-leaf { animation: none } .boot-fill { transform: scaleY(.6) } .boot-wave { display: none } }
+    </style>
     <script>
-      // safety net for bad venue wifi: if the app never started (half-loaded script), reload once
-      setTimeout(function () {
+      ;(function () {
+        var boot = document.getElementById('boot')
+        var msg = document.getElementById('boot-msg')
+        var retry = document.getElementById('boot-retry')
+        // the screens that wear the Neon Sunset look start dark, so the splash doesn't flash cream first
         try {
-          var r = document.getElementById('root')
-          if (r && !r.hasChildNodes() && !sessionStorage.getItem('pletok:retried')) {
-            sessionStorage.setItem('pletok:retried', '1')
-            location.reload()
-          }
+          var path = location.pathname.replace(/\/+$/, '')
+          var menu = JSON.parse(localStorage.getItem('pletok:menu') || 'null')
+          if (menu && menu.theme === 'sunset' && (path === '' || path === '/cashier' || path === '/link')) boot.setAttribute('data-theme', 'sunset')
         } catch (e) {}
-      }, 6000)
+        var say = function (t) {
+          if (!window.__pletokUp && msg) msg.textContent = t
+        }
+        setTimeout(function () { say(navigator.onLine === false ? 'Offline — membuka versi yang tersimpan di HP…' : 'Sinyal lagi lemot — sebentar ya…') }, 3500)
+        // safety net for bad venue wifi: if the app never started (half-loaded script), reload once
+        setTimeout(function () {
+          try {
+            if (!window.__pletokUp && !sessionStorage.getItem('pletok:retried')) {
+              sessionStorage.setItem('pletok:retried', '1')
+              location.reload()
+            }
+          } catch (e) {}
+        }, 9000)
+        // after the one automatic try, it's the visitor's call
+        setTimeout(function () {
+          if (window.__pletokUp) return
+          say('Masih memuat. Coba pindah ke data seluler, lalu muat ulang.')
+          if (retry) retry.hidden = false
+        }, 14000)
+      })()
     </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>

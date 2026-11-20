@@ -4,7 +4,12 @@
  */
 
 let ac: AudioContext | null = null
-const ctx = () => (ac ??= new AudioContext())
+// older Safari only has the webkit- name
+const AC = (globalThis as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext }).AudioContext ?? (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+const ctx = () => {
+  if (!AC) throw new Error('no audio')
+  return (ac ??= new AC())
+}
 
 export function unlockAudio() {
   try {

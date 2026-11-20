@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef } from 'react'
 import { encode } from 'uqr'
 import { drawQr } from '../lib/qrisDraw'
 
-/** a plain link QR in Pletok colours (same drawing as the QRIS, no animation) — ecc Q, scans from a tilted screen */
-export function LinkQr({ url, className = '' }: { url: string; className?: string }) {
-  const qr = useMemo(() => encode(url, { ecc: 'Q', border: 0 }), [url])
+/** a plain link QR in Pletok colours (same drawing as the QRIS, no animation) — ecc Q, scans from a tilted screen;
+ *  long links (a receipt carrying its sale) use M so the modules stay big enough to read off a phone */
+export function LinkQr({ url, className = '', ecc = 'Q' }: { url: string; className?: string; ecc?: 'L' | 'M' | 'Q' | 'H' }) {
+  const qr = useMemo(() => encode(url, { ecc, border: 0 }), [url, ecc])
   const hostRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   useEffect(() => {

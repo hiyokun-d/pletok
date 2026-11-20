@@ -1,6 +1,6 @@
 import { motion } from 'motion/react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Banknote, Check, Coins, Crown, Landmark, QrCode, Download, ExternalLink, HelpCircle, Hourglass, ImageIcon, Lightbulb, Loader2, MessageCircle, MessageCircleHeart, PackageCheck, RefreshCw, ScanLine, Search, Send, Settings2, ShieldAlert, ShoppingBag, Sparkles, Star, ThumbsUp, Undo2, Users, Wallet, X } from 'lucide-react'
+import { ArrowRight, Banknote, Check, Coins, Crown, Landmark, QrCode, Download, ExternalLink, HelpCircle, Hourglass, ImageIcon, Lightbulb, Loader2, MessageCircle, MessageCircleHeart, PackageCheck, RefreshCw, ScanLine, Search, Send, Settings2, ShieldAlert, ShoppingBag, Sparkles, Star, ThumbsUp, TrendingUp, Undo2, Users, Wallet, X } from 'lucide-react'
 import { EVENT, SITE_URL } from '../data/event'
 import { DRINKS } from '../data/menu'
 import { AnimatePresence } from 'motion/react'
@@ -8,6 +8,7 @@ import { BACKEND, crewPin, fetchProof, fetchQueue, fetchResults, saveMoneyHolder
 import { usePreorder } from '../hooks/usePreorder'
 import { PREORDER_ITEMS, rupiah } from '../data/preorder'
 import { spring } from '../lib/motion'
+import { csvBlob, saveFile } from '../lib/download'
 import { Btn, Card, CrewNav, DEMO, Empty, PinGate, Shell, Tile, WAIT, dayTime, hhmm, useCrewPage, wait } from './adminUi'
 
 /**
@@ -16,7 +17,7 @@ import { Btn, Card, CrewNav, DEMO, Empty, PinGate, Shell, Tile, WAIT, dayTime, h
  * One series per chart → one brand colour; labels carry identity, never colour alone.
  */
 
-const BAR = '#a8572a' // validated on the cream surface (dataviz validator: all checks pass)
+export const BAR = '#a8572a' // validated on the cream surface (dataviz validator: all checks pass)
 const RATING_LABELS = ['Kurang', 'Biasa', 'Enak', 'Enak bgt', 'Juara!']
 const GRID = [
   { key: 'like', title: 'Like', sub: 'yang disukai', Icon: ThumbsUp },
@@ -193,6 +194,10 @@ function Money({ orders, booth, holders, bcaName, save }: { orders: Order[]; boo
           </div>
         ))}
       </div>
+      <a href={'/financial' + window.location.search} className="mt-3 flex items-center gap-2 rounded-2xl bg-brown/[0.06] px-4 py-3 font-display text-sm font-semibold">
+        <TrendingUp className="size-4 text-terracotta" /> Laba, balik modal, hitung kas & bagi hasil → Financial
+        <ArrowRight className="ml-auto size-4" />
+      </a>
     </Card>
   )
 }
@@ -594,14 +599,14 @@ function Summary({ data }: { data: Results }) {
 
 /* ------------------------------------------------------------------ charts (plain HTML, one hue) */
 
-interface ColBar {
+export interface ColBar {
   label: string
   sub: string
   n: number
 }
 
 /** vertical bars on a shared baseline; count on top, hover for the full sentence */
-function ColumnChart({ bars, total, tip }: { bars: ColBar[]; total: number; tip: (b: ColBar) => string }) {
+export function ColumnChart({ bars, total, tip, empty = 'Belum ada rating', value = (b) => b.n || '' }: { bars: ColBar[]; total: number; tip: (b: ColBar) => string; empty?: string; value?: (b: ColBar) => string | number }) {
   const [hover, setHover] = useState<number | null>(null)
   const max = Math.max(1, ...bars.map((b) => b.n))
   return (
@@ -618,7 +623,7 @@ function ColumnChart({ bars, total, tip }: { bars: ColBar[]; total: number; tip:
             onPointerEnter={() => setHover(i)}
             onPointerLeave={() => setHover(null)}
           >
-            <span className="mb-1 font-display text-sm font-semibold tabular-nums text-brown">{b.n || ''}</span>
+            <span className="mb-1 whitespace-nowrap font-display text-sm font-semibold tabular-nums text-brown">{value(b)}</span>
             <motion.span
               className="w-full max-w-16 rounded-t-[4px]"
               style={{ background: BAR, opacity: hover === null || hover === i ? 1 : 0.45 }}
@@ -638,13 +643,13 @@ function ColumnChart({ bars, total, tip }: { bars: ColBar[]; total: number; tip:
           </div>
         ))}
       </div>
-      {!total && <p className="absolute inset-x-0 top-16 text-center font-cond italic text-brown/45">Belum ada rating</p>}
+      {!total && <p className="absolute inset-x-0 top-16 text-center font-cond italic text-brown/45">{empty}</p>}
     </div>
   )
 }
 
 /** one row of a checkbox question: picture, name, bar (% of people who answered), count */
-function HBar({ label, img, n, share, top }: { label: string; img: string; n: number; share: number; top: boolean }) {
+export function HBar({ label, img, n, share, top }: { label: string; img: string; n: number; share: number; top: boolean }) {
   const [hover, setHover] = useState(false)
   return (
     <div className="relative flex items-center gap-3" onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}>
@@ -715,7 +720,7 @@ function Timeline({ responses }: { responses: Response[] }) {
   )
 }
 
-function Tooltip({ children }: { children: string }) {
+export function Tooltip({ children }: { children: string }) {
   return (
     <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 -translate-x-1/2 whitespace-nowrap rounded-xl bg-brown px-3 py-1.5 font-display text-xs font-semibold text-cream shadow-lg">
       {children}
@@ -725,16 +730,7 @@ function Tooltip({ children }: { children: string }) {
 
 /* ------------------------------------------------------------------ bits */
 
-/** a CSV that Excel / Google Sheets / Docs open cleanly (BOM for Excel's UTF-8) */
-function saveCsv(file: string, head: string[], rows: unknown[][]) {
-  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
-  const blob = new Blob(['\ufeff' + [head, ...rows].map((r) => r.map(esc).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' })
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = `${file}-${new Date().toISOString().slice(0, 10)}.csv`
-  a.click()
-  URL.revokeObjectURL(a.href)
-}
+const saveCsv = (file: string, head: string[], rows: unknown[][]) => saveFile(`${file}-${new Date().toISOString().slice(0, 10)}.csv`, csvBlob([head, ...rows]))
 
 const downloadCsv = (rs: Response[]) =>
   saveCsv(

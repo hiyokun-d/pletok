@@ -9,6 +9,7 @@ import { EVENT, FEEDBACK_URL, INSTAGRAM_HANDLE, INSTAGRAM_URL } from '../data/ev
 import { Ornament } from '../components/Ornament'
 import { LogoRig } from '../components/LogoRig'
 import { CupCard } from '../components/CupCard'
+import { DrinkDetails } from '../components/DrinkDetails'
 import { BundleCard } from '../components/BundleCard'
 import { EventStatus } from '../components/EventStatus'
 import { usePreorder } from '../hooks/usePreorder'
@@ -181,7 +182,10 @@ export function MobileSite({ onEgg }: { onEgg: () => void }) {
         </div>
         <div className="flex flex-col gap-8">
           {menu.drinks.map((d, i) => (
-            <CupCard key={d.id} drink={d} index={i} soldOut={d.soldOut} />
+            <div key={d.id} className="flex flex-col">
+              <CupCard drink={d} index={i} soldOut={d.soldOut} />
+              <DrinkDetails drink={d} />
+            </div>
           ))}
         </div>
       </section>

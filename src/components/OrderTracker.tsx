@@ -234,8 +234,13 @@ function CopyBtn({ text, label }: { text: string; label: string }) {
     } catch {
       const t = document.createElement('textarea')
       t.value = text
+      // iOS only copies from a real, selectable range; readonly keeps the keyboard from popping up
+      t.readOnly = true
+      t.style.position = 'fixed'
+      t.style.opacity = '0'
       document.body.appendChild(t)
       t.select()
+      t.setSelectionRange(0, text.length)
       document.execCommand('copy')
       t.remove()
     }

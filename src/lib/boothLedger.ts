@@ -1,4 +1,5 @@
 import { checkBoothOrders, sendBoothOrder, type BoothLine, type BoothPay } from './backend'
+import { csvBlob, saveFile } from './download'
 
 /*
  * The cashier phone's own log of every sale — written BEFORE anything goes over the network, so a
@@ -45,6 +46,14 @@ function write(sales: LedgerSale[]) {
   subs.forEach((f) => f())
 }
 const patch = (id: string, p: Partial<LedgerSale>) => write(read().map((s) => (s.id === id ? { ...s, ...p } : s)))
+
+// /cashier open in another tab of this phone (e.g. next to /pickup): follow its log
+if (typeof window !== 'undefined')
+  window.addEventListener('storage', (e) => {
+    if (e.key !== KEY) return
+    snap = read()
+    subs.forEach((f) => f())
+  })
 
 export const ledger = () => snap
 export const onLedger = (f: () => void) => {
@@ -123,10 +132,6 @@ export function downloadLedger() {
       s.pay,
     ]),
   )
-  const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }))
-  a.download = `Kasir Pletok (HP ini) ${new Date().toLocaleDateString('id-ID')}.csv`
-  a.click()
-  URL.revokeObjectURL(a.href)
+  // no slashes in the name — some browsers turn "20/11/2026" into folders or refuse it
+  saveFile(`Kasir Pletok (HP ini) ${new Date().toISOString().slice(0, 10)}.csv`, csvBlob(rows))
 }

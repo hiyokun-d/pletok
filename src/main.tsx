@@ -2,16 +2,7 @@ import { StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Analytics } from '@vercel/analytics/react'
 import { SpeedInsights } from '@vercel/speed-insights/react'
-import App from './App'
 import { GoHop, type HopTarget } from './views/GoHop'
-import { LinksPage } from './views/LinksPage'
-import { FeedbackPage } from './views/FeedbackPage'
-import { HasilPage } from './views/HasilPage'
-import { PreorderPage } from './views/PreorderPage'
-import { ConfigPage } from './views/ConfigPage'
-import { CashierPage } from './views/CashierPage'
-import { PickupPage } from './views/PickupPage'
-import { ReceiptPage, SavedReceiptsPage } from './views/ReceiptPage'
 import { TRAP_PATH, TrapPage } from './views/TrapPage'
 import { SystemStatus } from './components/SystemStatus'
 import { ThemeHost } from './components/SunsetTheme'
@@ -28,29 +19,40 @@ const path = window.location.pathname.replace(/\/+$/, '')
 const hop = path.match(/^\/go\/(ig|feedback)$/)?.[1] as HopTarget | undefined
 // a booth receipt from the cashier's QR: /r/<sale id>
 const receipt = path.match(/^\/r\/([A-Za-z0-9-]{8,64})$/)?.[1]
-const PAGES: Record<string, () => ReactNode> = {
-  '': () => <App />,
-  '/link': () => <LinksPage />,
-  '/feedback': () => <FeedbackPage />,
-  '/hasil': () => <HasilPage />,
-  '/preorder': () => <PreorderPage />,
-  '/config': () => <ConfigPage />,
-  '/cashier': () => <CashierPage />,
-  '/pickup': () => <PickupPage />,
-  '/struk': () => <SavedReceiptsPage />,
+/*
+ * Each page is its own download: a crew phone opening /pickup on festival wifi doesn't pull in the
+ * menu's 3D leaves and particles first. The loading screen stays up until the page's code is here,
+ * then it renders in one go (no second spinner).
+ */
+const PAGES: Record<string, () => Promise<ReactNode>> = {
+  '': () => import('./App').then((m) => <m.default />),
+  '/link': () => import('./views/LinksPage').then((m) => <m.LinksPage />),
+  '/feedback': () => import('./views/FeedbackPage').then((m) => <m.FeedbackPage />),
+  '/hasil': () => import('./views/HasilPage').then((m) => <m.HasilPage />),
+  '/financial': () => import('./views/FinancialPage').then((m) => <m.FinancialPage />),
+  '/preorder': () => import('./views/PreorderPage').then((m) => <m.PreorderPage />),
+  '/config': () => import('./views/ConfigPage').then((m) => <m.ConfigPage />),
+  '/cashier': () => import('./views/CashierPage').then((m) => <m.CashierPage />),
+  '/pickup': () => import('./views/PickupPage').then((m) => <m.PickupPage />),
+  '/struk': () => import('./views/ReceiptPage').then((m) => <m.SavedReceiptsPage />),
 }
+/** the crew tabs: once one is open, the others download quietly so switching is instant */
+const CREW = ['/cashier', '/pickup', '/hasil', '/financial', '/config']
 // dev only: /_error/500 (or 503, offline) previews the other error pages
 const preview = import.meta.env.DEV ? path.match(/^\/_error\/(404|500|503|offline)$/)?.[1] : undefined
-const page = hop ? (
-  <GoHop to={hop} />
-) : TRAP_PATH.test(path) ? (
-  // /admin & co: a decoy that logs who's poking around (the real crew pages need the PIN on the server)
-  <TrapPage />
-) : preview ? (
-  <ErrorPage kind={(preview === 'offline' ? 'offline' : Number(preview)) as ErrorKind} />
-) : (
-  receipt ? <ReceiptPage id={receipt} /> : (PAGES[path]?.() ?? <ErrorPage kind={404} />)
-)
+const load = async (): Promise<ReactNode> =>
+  hop ? (
+    <GoHop to={hop} />
+  ) : TRAP_PATH.test(path) ? (
+    // /admin & co: a decoy that logs who's poking around (the real crew pages need the PIN on the server)
+    <TrapPage />
+  ) : preview ? (
+    <ErrorPage kind={(preview === 'offline' ? 'offline' : Number(preview)) as ErrorKind} />
+  ) : receipt ? (
+    import('./views/ReceiptPage').then((m) => <m.ReceiptPage id={receipt} />)
+  ) : (
+    (PAGES[path]?.() ?? <ErrorPage kind={404} />)
+  )
 
 // keep the menu working when the venue wifi gives up (production only — dev stays uncached)
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
@@ -61,6 +63,22 @@ if (!hop) {
   installClickTracking()
   trackSource()
 }
+
+const page = await load()
+
+// the app is up: index.html's safety net stands down and its loading screen fades away
+;(window as Window & { __pletokUp?: boolean }).__pletokUp = true
+try {
+  sessionStorage.removeItem('pletok:retried')
+} catch {
+  /* fine */
+}
+requestAnimationFrame(() => {
+  const boot = document.getElementById('boot')
+  if (!boot) return
+  boot.classList.add('gone')
+  window.setTimeout(() => boot.remove(), 500)
+})
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -74,3 +92,9 @@ createRoot(document.getElementById('root')!).render(
     {!hop && <SpeedInsights />}
   </StrictMode>,
 )
+
+if (CREW.includes(path)) {
+  // Safari has no requestIdleCallback
+  const idle = (f: () => void) => (typeof requestIdleCallback === 'function' ? requestIdleCallback(f, { timeout: 3000 }) : setTimeout(f, 1500))
+  idle(() => CREW.filter((p) => p !== path).forEach((p) => void PAGES[p]().catch(() => {})))
+}

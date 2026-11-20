@@ -16,7 +16,7 @@ import { hhmm } from '../views/adminUi'
  * notices recovery on pages that don't poll by themselves.
  */
 
-const CREW = ['/hasil', '/config', '/cashier', '/pickup']
+const CREW = ['/hasil', '/financial', '/config', '/cashier', '/pickup']
 
 export function SystemStatus() {
   const h = useSyncExternalStore(onHealth, health)

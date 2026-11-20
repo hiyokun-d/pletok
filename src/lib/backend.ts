@@ -112,7 +112,7 @@ export async function flushOutbox() {
       const r = await send(p)
       if (r === 'down') break // offline or the Sheet is down — keep the rest for the next try
       // sent, or refused for good (it would block everything behind it forever)
-      write(read().filter((q) => q.id !== p.id))
+      write(read().filter((q) => !same(q, p)))
     }
   } finally {
     flushing = false
@@ -121,9 +121,11 @@ export async function flushOutbox() {
 
 export const pendingCount = () => read().length
 
-/** queue it, then try to send right away */
+/** one entry per kind of thing per id: a sale and its pickup share an id but are different entries */
+const same = (a: Payload, b: Payload) => a.id === b.id && a.type === b.type && a.src === b.src && !!a.ready === !!b.ready
+/** queue it, then try to send right away (order kept: a sale queued before its pickup lands first) */
 export function enqueue(p: Payload) {
-  write([...read().filter((q) => q.id !== p.id), p])
+  write([...read().filter((q) => !same(q, p)), p])
   return flushOutbox()
 }
 
@@ -237,6 +239,10 @@ export interface Results {
   /** newest first: wrong PINs and visits to the fake /admin */
   security?: SecurityEvent[]
   orders?: Order[]
+  /** /financial: costs, HPP, target, crew — null until someone saves it */
+  finance?: FinanceConfig | null
+  /** /financial: what each pot actually held when counted at closing */
+  closing?: Partial<Record<'tunai' | 'bca' | 'qris', ClosingCount>>
   responses: Response[]
   scans: Array<{ at: number; target: string }>
 }
@@ -413,6 +419,50 @@ export interface MoneyHolders {
   qris: string
   tunai: string
 }
+/* ---------------------------------------------------------------- /financial
+ * All money here is in full rupiah (like BEC_VENTURE), unlike order totals (thousands). Kept as
+ * script properties in Code.gs — the Sheet gets no extra tab. */
+export interface CostLine {
+  name: string
+  /** full rupiah */
+  amount: number
+  /** "7 Liter × 45.000" — how it was bought, for the report */
+  detail?: string
+  /** who paid it out of their own pocket ('' = from the team's money) */
+  by?: string
+}
+export interface FinanceConfig {
+  /** cost of one cup, full rupiah — cup + ingredients (BEC_VENTURE "HPP") */
+  hpp: Record<string, number>
+  /** stock bought for the day (BEC_VENTURE "MODAL") */
+  modal: CostLine[]
+  /** everything else: banner, sticker, table cloth, prototypes (BEC_VENTURE "Quotation") */
+  ops: CostLine[]
+  /** the plan: cups and omzet (full rupiah) */
+  target: { cups: number; omzet: number }
+  /** who shares the profit at the end ([] = it stays in the team's money) */
+  crew: string[]
+  at?: number
+}
+export interface ClosingCount {
+  /** full rupiah */
+  counted: number
+  by: string
+  at: number
+}
+export async function saveFinance(pin: string, finance: FinanceConfig): Promise<boolean> {
+  return !!(await postJson({ type: 'finance', pin, finance: { ...finance, at: Date.now() } }, 2))?.ok
+}
+/** `counted: null` clears that pot's count */
+export async function saveClosing(pin: string, pot: 'tunai' | 'bca' | 'qris', counted: number | null, by: string) {
+  const r = await postJson<{ closing: Results['closing'] }>({ type: 'closing', pin, pot, counted, by }, 2)
+  return r?.ok ? (r.closing ?? {}) : null
+}
+export async function makeFinanceReport(pin: string, title: string, sections: Array<{ heading: string; note?: string; rows: string[][] }>) {
+  const r = await postJson<{ url: string }>({ type: 'finance-report', pin, title, sections }, 1)
+  return r?.ok ? r.url : null
+}
+
 export async function saveMoneyHolders(pin: string, money: MoneyHolders): Promise<boolean> {
   return !!(await postJson({ type: 'money-holders', pin, money }, 2))?.ok
 }
