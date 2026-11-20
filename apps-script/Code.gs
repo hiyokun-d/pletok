@@ -142,6 +142,24 @@ const PREORDER_ITEMS = {
 // never into the event day (pre-order runs 18–24 Nov, 7 days)
 const PREORDER_CUTOFF = new Date('2026-11-24T23:59:00+07:00').getTime()
 
+// the feedback form, checked HERE too — a phone's clock, an old tab or a crew clock override can't open it.
+// 'auto' = from opening until 25 min after closing (same as the site); /hasil can force open / closed.
+const FEEDBACK_FROM = new Date('2026-11-25T13:00:00+07:00').getTime()
+const FEEDBACK_UNTIL = new Date('2026-11-25T16:25:00+07:00').getTime()
+// a feedback written while open can arrive late (the phone had no signal) — up to this long
+const FEEDBACK_LATE_MS = 6 * 3600 * 1000
+// someone mid-answer when /hasil closed it still gets in, if they send within this
+const FEEDBACK_FINISH_MS = 10 * 60 * 1000
+function feedbackAccepted_(props, writtenAt, now) {
+  const t = now.getTime()
+  const at = Math.min(Number(writtenAt) || t, t) // a time from the future isn't believed
+  if (t - at > FEEDBACK_LATE_MS) return false
+  const mode = props.getProperty('FEEDBACK_MODE') || 'auto'
+  if (mode === 'open') return true
+  if (mode === 'closed') return at < (Number(props.getProperty('FEEDBACK_MODE_AT')) || 0) + FEEDBACK_FINISH_MS
+  return at >= FEEDBACK_FROM && at <= FEEDBACK_UNTIL + FEEDBACK_FINISH_MS
+}
+
 function preorderConfig_() {
   const raw = PropertiesService.getScriptProperties().getProperty('PREORDER')
   const saved = raw ? JSON.parse(raw) : {}
@@ -274,6 +292,7 @@ function doPost(e) {
 
     if (b.type === 'feedback') {
       if (b.hp) return json_({ ok: true }) // honeypot filled → a bot, pretend it worked
+      if (!feedbackAccepted_(props, b.at, now)) return json_({ ok: false, error: 'closed' })
       const sh = sheet_('Feedback', FEEDBACK_COLS)
       // the phone retries until it hears back — skip an ID we already saved
       const ids = sh.getLastRow() > 1 ? sh.getRange(2, 2, sh.getLastRow() - 1, 1).getValues().flat() : []
@@ -304,6 +323,7 @@ function doPost(e) {
       if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
       if (['auto', 'open', 'closed'].indexOf(b.mode) === -1) return json_({ ok: false, error: 'mode' })
       props.setProperty('FEEDBACK_MODE', b.mode)
+      props.setProperty('FEEDBACK_MODE_AT', String(Date.now()))
       CacheService.getScriptCache().remove('stats')
       return json_({ ok: true })
     }
