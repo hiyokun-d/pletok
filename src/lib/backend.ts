@@ -103,13 +103,18 @@ async function send(p: Payload): Promise<'ok' | 'no' | 'down'> {
 }
 const post = async (p: Payload) => (await send(p)) === 'ok'
 
+/** an entry a page is sending itself right now (durable) — the outbox leaves it alone this long */
+const OWN_SEND_MS = 25_000
+const body_ = ({ _at: _, ...p }: Payload) => p as Payload
+
 let flushing = false
 export async function flushOutbox() {
   if (flushing || !BACKEND) return
   flushing = true
   try {
     for (const p of read()) {
-      const r = await send(p)
+      if (typeof p._at === 'number' && Date.now() - p._at < OWN_SEND_MS) continue
+      const r = await send(body_(p))
       if (r === 'down') break // offline or the Sheet is down — keep the rest for the next try
       // sent, or refused for good (it would block everything behind it forever)
       write(read().filter((q) => !same(q, p)))
@@ -127,6 +132,32 @@ const same = (a: Payload, b: Payload) => a.id === b.id && a.type === b.type && a
 export function enqueue(p: Payload) {
   write([...read().filter((q) => !same(q, p)), p])
   return flushOutbox()
+}
+
+/**
+ * A crew tap that has to land ("siap", "diambil", a sale, a cancel): into the outbox FIRST — so a page
+ * the phone freezes or closes mid-send still has it — then sent right now. Gone from the outbox once
+ * the Sheet answers; if it doesn't, the outbox keeps trying from any crew page.
+ */
+async function durable<T>(p: Payload, tries = 2) {
+  write([...read().filter((q) => !same(q, p)), { ...p, _at: Date.now() }])
+  const r = await postJson<T>(p, tries)
+  if (r && sheetOk(r)) write(read().filter((q) => !same(q, p)))
+  return r
+}
+
+/**
+ * Leaving the tab or the app: push everything waiting out now. keepalive requests finish even after
+ * the page is put to sleep. Nothing is taken off the outbox here (no answer to wait for) — the next
+ * round re-sends, and the Sheet ignores repeats by id. Entries without an id aren't safe to repeat,
+ * so they wait for the normal round.
+ */
+function flushOnLeave() {
+  if (!BACKEND) return
+  for (const p of read()) {
+    if (!p.id) continue
+    void fetch(BACKEND, { method: 'POST', body: JSON.stringify(withUa(body_(p))), keepalive: true }).catch(() => {})
+  }
 }
 
 /** one QR scan — fire and forget, a lost scan isn't worth a queue */
@@ -589,7 +620,10 @@ export function onStats(fn: (s: RemoteStats) => void) {
 
 if (typeof window !== 'undefined' && BACKEND) {
   window.addEventListener('online', () => void flushOutbox())
+  // keeps going while the tab is in the background too (browsers slow it to about once a minute)
   window.setInterval(() => void flushOutbox(), 15_000)
+  document.addEventListener('visibilitychange', () => (document.visibilityState === 'hidden' ? flushOnLeave() : void flushOutbox()))
+  window.addEventListener('pagehide', flushOnLeave)
   void flushOutbox()
 }
 
@@ -638,7 +672,7 @@ export function fetchQueue(pin: string): Promise<QueueOrder[] | 'pin' | null> {
 export type BoothPay = 'tunai' | 'qris' | 'bca'
 /** a walk-in sale; the id makes a retry safe (same sale, same code) */
 export async function sendBoothOrder(pin: string, order: { id: string; lines: BoothLine[]; pay: BoothPay; name: string; note: string }) {
-  const r = await postJson<{ code: string }>({ type: 'booth-order', pin, ...order })
+  const r = await durable<{ code: string }>({ type: 'booth-order', pin, ...order })
   return r?.ok ? r.code : r?.error === 'pin' ? ('pin' as const) : null
 }
 
@@ -650,7 +684,7 @@ export async function checkBoothOrders(pin: string, ids: string[]) {
 
 /** "siap": the drink is ready — the buyer's receipt page (/r/<id>) rings */
 export async function markReady(pin: string, id: string) {
-  return !!(await postJson({ type: 'pickup', pin, src: 'booth', id, ready: true }, 2))?.ok
+  return !!(await durable({ type: 'pickup', pin, src: 'booth', id, ready: true }))?.ok
 }
 
 /** a booth sale's live receipt — everything comes from the Sheet, the QR only carries the id */
@@ -684,7 +718,7 @@ export async function fetchReceipt(id: string): Promise<BoothReceipt | 'none' | 
 }
 
 export async function voidBoothOrder(pin: string, id: string) {
-  return !!(await postJson({ type: 'booth-void', pin, id }, 2))?.ok
+  return !!(await durable({ type: 'booth-void', pin, id }))?.ok
 }
 
 const normProof = (t: string) => t.toUpperCase().replace(/[^A-Z0-9]/g, '')
@@ -706,7 +740,7 @@ export async function pickUpPreorder(pin: string, id: string, proof: { proof?: s
 }
 
 export async function markPickedUp(pin: string, src: QueueOrder['src'], id: string, done: boolean) {
-  return !!(await postJson({ type: 'pickup', pin, src, id, done }, 2))?.ok
+  return !!(await durable({ type: 'pickup', pin, src, id, done }))?.ok
 }
 
 /** the fake /admin page reports itself — fire and forget */

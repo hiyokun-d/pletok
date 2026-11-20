@@ -109,6 +109,8 @@ export function PickupPage() {
   const soundRef = useRef(sound)
   soundRef.current = sound
   const [focus, setFocus] = useState(() => stored(FOCUS_KEY))
+  // the order "Scan struk" found while in focus mode
+  const [pick, setPick] = useState<{ id: string; at: number } | null>(null)
   const [toast, setToast] = useState<QueueOrder[]>([])
   const [unseen, setUnseen] = useState(0)
 
@@ -344,12 +346,14 @@ export function PickupPage() {
       <ScanStruk
         open={scan}
         pin={pin}
+        known={(id) => all.find((o) => o.id === id)}
         onClose={() => setScan(false)}
         onFound={(id, code) => {
           setScan(false)
           // already in the Sheet → its real number; otherwise the temporary one
-          setQ((orders ?? []).find((o) => o.id === id)?.code ?? code)
-          setFocus(false)
+          // focus mode stays: the scanned order opens in the focus card; the list jumps to it
+          if (focus) setPick({ id, at: Date.now() })
+          else setQ((orders ?? []).find((o) => o.id === id)?.code ?? code)
         }}
       />
 
@@ -363,6 +367,7 @@ export function PickupPage() {
           onCall={call}
           calling={calling}
           calls={calls}
+          pick={pick}
           onDone={(id, by, done) => (setMark(id, { done, by }), setOrders((os) => os?.map((x) => (x.id === id ? { ...x, done, pickedBy: by } : x)) ?? os))}
         />
       ) : (
@@ -685,6 +690,7 @@ function FocusDesk({
   onCall,
   calling,
   calls,
+  pick,
 }: {
   orders: QueueOrder[] | null
   waiting: number
@@ -696,6 +702,7 @@ function FocusDesk({
   onCall: (o: QueueOrder) => Promise<void>
   calling: Set<string>
   calls: Record<string, number>
+  pick: { id: string; at: number } | null
 }) {
   const [src, setSrc] = useState<'po' | 'booth'>('po')
   const [num, setNum] = useState('')
@@ -704,13 +711,34 @@ function FocusDesk({
   // handed over just now — show the green "done", not the red "already taken"
   const [handed, setHanded] = useState<{ o: QueueOrder; by: string } | null>(null)
   const numRef = useRef<HTMLInputElement>(null)
+  // a scanned order with no number yet (#0B6C, not in the Sheet) is opened by id instead
+  const [picked, setPicked] = useState<string | null>(null)
   const n = Number(num)
-  const found = num ? (orders ?? []).filter((o) => o.src === src && Number(o.code.replace(/\D/g, '')) === n) : []
+  const found = picked ? (orders ?? []).filter((o) => o.id === picked) : num ? (orders ?? []).filter((o) => o.src === src && /^(PLT|B)-\d+$/.test(o.code) && Number(o.code.replace(/\D/g, '')) === n) : []
   const o = found[0]
+
+  // "Scan struk" found one: show it here, as if its number had been typed
+  useEffect(() => {
+    if (!pick) return
+    const hit = (orders ?? []).find((x) => x.id === pick.id)
+    setHanded(null)
+    setRound((r) => r + 1)
+    if (hit && /^(PLT|B)-\d+$/.test(hit.code)) {
+      setSrc(hit.src)
+      setNum(String(Number(hit.code.replace(/\D/g, ''))).padStart(3, '0'))
+      setPicked(null)
+    } else {
+      setSrc('booth')
+      setNum('')
+      setPicked(pick.id)
+    }
+    // only when a new scan comes in — not on every queue refresh
+  }, [pick])
   const prefix = src === 'po' ? 'PLT-' : 'B-'
 
   const next = () => {
     setNum('')
+    setPicked(null)
     setHanded(null)
     setRound((r) => r + 1)
     window.setTimeout(() => numRef.current?.focus(), 50)
@@ -751,22 +779,23 @@ function FocusDesk({
           ))}
         </div>
         <label className="flex items-center gap-1 rounded-2xl bg-cream-deep/80 px-4 py-3 focus-within:ring-2 focus-within:ring-terracotta">
-          <span className="font-display text-4xl font-bold text-terracotta/60">{prefix}</span>
+          {!picked && <span className="font-display text-4xl font-bold text-terracotta/60">{prefix}</span>}
           <input
             ref={numRef}
             autoFocus
             value={num}
             onChange={(e) => {
               setNum(e.target.value.replace(/\D/g, '').slice(0, 4))
+              setPicked(null)
               setHanded(null)
               setRound((r) => r + 1)
             }}
             inputMode="numeric"
-            placeholder="007"
+            placeholder={picked ? (o?.code ?? '') : '007'}
             aria-label={`Nomor ${prefix}`}
             className="w-full min-w-0 bg-transparent font-display text-4xl font-bold tracking-wider text-terracotta outline-none placeholder:text-brown/25"
           />
-          {num && (
+          {(num || picked) && (
             <button type="button" onClick={next} className="shrink-0 rounded-full border-2 border-brown/15 px-3 py-1.5 font-display text-sm font-semibold">
               Hapus
             </button>
@@ -786,7 +815,7 @@ function FocusDesk({
               Pelanggan berikutnya
             </button>
           </motion.div>
-        ) : !num ? null : !orders ? (
+        ) : !num && !picked ? null : !orders ? (
           <p key="load" className="mt-4 flex items-center justify-center gap-2 font-cond italic text-brown/55"><Loader2 className="size-4 animate-spin" /> Memuat antrean…</p>
         ) : !o ? (
           <motion.div key="none" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mt-4 rounded-[2rem] border-2 border-dashed border-terracotta/40 p-6 text-center font-display">

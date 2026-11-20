@@ -112,4 +112,16 @@ if (CREW.includes(path)) {
     setInterval(warmUp, 45_000)
     document.addEventListener('visibilitychange', warmUp)
   })
+  // cashier sales still only on this phone go out from whichever crew page is open (not only /cashier)
+  void import('./lib/boothLedger').then(({ ledger, sync }) =>
+    import('./lib/backend').then(({ crewPin }) => {
+      const push = () => {
+        const pin = crewPin()
+        if (pin && ledger().some((s) => s.state === 'pending')) void sync(pin)
+      }
+      setInterval(push, 20_000)
+      window.addEventListener('online', push)
+      window.addEventListener('pletok:recovered', push)
+    }),
+  )
 }

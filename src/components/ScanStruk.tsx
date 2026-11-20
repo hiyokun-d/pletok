@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Camera, CheckCircle2, ClipboardPaste, Loader2, ScanLine, ShieldAlert, X } from 'lucide-react'
 import { holdSale } from '../lib/crewLocal'
 import { unpack, verify } from '../lib/saleCode'
+import type { QueueOrder } from '../lib/backend'
 
 /*
  * "Scan struk" on /pickup — the cashier → pickup hand-off with no network at all. The buyer's
@@ -20,27 +21,38 @@ const Native = (globalThis as unknown as { BarcodeDetector?: DetectorCtor }).Bar
 type Result = { kind: 'ok'; code: string; id: string } | { kind: 'bad' | 'old' | 'other'; text: string }
 
 /** what a scanned / pasted text means for the queue */
-async function take(pin: string, text: string): Promise<Result> {
-  const m = text.trim().match(/\/r\/([A-Za-z0-9-]{8,64})(#.*)?$/)
+async function take(pin: string, text: string, known: (id: string) => QueueOrder | undefined): Promise<Result> {
+  const m = text.trim().match(/\/r\/([A-Za-z0-9-]{8,64})\/?(?:[?#].*)?$/)
   if (!m) return { kind: 'other', text: 'Bukan QR struk Pletok.' }
-  const packed = unpack(m[1], m[2] ?? '')
-  // an older struk (just the id): only the Sheet knows what's in it
-  if (!packed) return { kind: 'old', text: 'Struk ini cuma berisi nomor — isinya ada di Sheet. Cari pakai nama / nomornya.' }
+  const packed = unpack(m[1], m[2] ?? (text.match(/#.*$/)?.[0] ?? ''))
+  if (!packed) {
+    // a struk with just its id (made before the order was packed in, or the link got cut): this phone's
+    // queue may still have it — then go straight to it
+    const o = known(m[1])
+    if (o) return { kind: 'ok', code: o.code, id: o.id }
+    return { kind: 'old', text: 'Pesanan ini belum ada di antrean HP ini (sinyal / Sheet). Tanya nama pembelinya lalu cari di kolom pencarian — atau minta kasir buka "Struk" di riwayatnya dan scan QR dari layar kasir.' }
+  }
   const seal = await verify(pin, packed)
   if (seal === 'bad') return { kind: 'bad', text: 'Segel tidak cocok — QR ini bukan dari kasir Pletok atau isinya diubah. Jangan serahkan, cek ke kasir.' }
   holdSale(pin, packed)
   return { kind: 'ok', code: '#' + packed.id.slice(0, 4).toUpperCase(), id: packed.id }
 }
 
-export function ScanStruk({ open, pin, onClose, onFound }: { open: boolean; pin: string; onClose: () => void; onFound: (id: string, code: string) => void }) {
-  return <AnimatePresence>{open && <Sheet key="scan" pin={pin} onClose={onClose} onFound={onFound} />}</AnimatePresence>
+type Props = { pin: string; known: (id: string) => QueueOrder | undefined; onClose: () => void; onFound: (id: string, code: string) => void }
+
+export function ScanStruk({ open, ...props }: Props & { open: boolean }) {
+  return <AnimatePresence>{open && <Sheet key="scan" {...props} />}</AnimatePresence>
 }
 
-function Sheet({ pin, onClose, onFound }: { pin: string; onClose: () => void; onFound: (id: string, code: string) => void }) {
+function Sheet({ pin, known, onClose, onFound }: Props) {
   const video = useRef<HTMLVideoElement>(null)
   // the page re-renders every few seconds (its poll) — the camera mustn't restart each time
   const found = useRef(onFound)
   found.current = onFound
+  const lookup = useRef(known)
+  lookup.current = known
+  // a camera facing you (laptop webcam, selfie camera) shows as a mirror — easier to aim the QR
+  const [mirror, setMirror] = useState(false)
   const [cam, setCam] = useState<'starting' | 'on' | 'denied' | 'none'>(Native ? 'starting' : 'none')
   const [result, setResult] = useState<Result | null>(null)
   const [paste, setPaste] = useState('')
@@ -60,7 +72,7 @@ function Sheet({ pin, onClose, onFound }: { pin: string; onClose: () => void; on
         try {
           const [hit] = await detector.detect(v)
           if (hit && live) {
-            const r = await take(pin, hit.rawValue)
+            const r = await take(pin, hit.rawValue, lookup.current)
             setResult(r)
             if (r.kind === 'ok') {
               navigator.vibrate?.(80)
@@ -80,6 +92,7 @@ function Sheet({ pin, onClose, onFound }: { pin: string; onClose: () => void; on
       .then((s) => {
         if (!live) return s.getTracks().forEach((x) => x.stop())
         stream = s
+        setMirror(s.getVideoTracks()[0]?.getSettings?.().facingMode !== 'environment')
         if (video.current) {
           video.current.srcObject = s
           void video.current.play().catch(() => {})
@@ -96,7 +109,7 @@ function Sheet({ pin, onClose, onFound }: { pin: string; onClose: () => void; on
   }, [pin])
 
   const submitPaste = async () => {
-    const r = await take(pin, paste)
+    const r = await take(pin, paste, lookup.current)
     setResult(r)
     if (r.kind === 'ok') window.setTimeout(() => found.current(r.id, r.code), 700)
   }
@@ -122,7 +135,7 @@ function Sheet({ pin, onClose, onFound }: { pin: string; onClose: () => void; on
         {cam !== 'none' && (
           <div className="relative mt-4 aspect-square overflow-hidden rounded-3xl bg-brown">
             {/* muted + playsInline: iOS only plays a live camera inline like this */}
-            <video ref={video} muted playsInline autoPlay className="size-full object-cover" />
+            <video ref={video} muted playsInline autoPlay className="size-full object-cover" style={mirror ? { transform: 'scaleX(-1)' } : undefined} />
             <span className="pointer-events-none absolute inset-[18%] rounded-3xl border-4 border-yakult/80" />
             {cam === 'starting' && <span className="absolute inset-0 grid place-items-center text-cream"><Loader2 className="size-8 animate-spin" /></span>}
             {cam === 'denied' && (

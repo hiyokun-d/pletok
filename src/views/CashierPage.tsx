@@ -59,7 +59,7 @@ export function CashierPage() {
   // taps on "Lunas" without a name — each one shakes the field, and the reminder gets firmer
   const [needName, setNeedName] = useState(0)
   const nameBox = useRef<HTMLInputElement>(null)
-  const [pay, setPay] = useState<BoothPay>('tunai')
+  const [pay, setPay] = useState<BoothPay>('qris')
   // same account the pre-orders pay into (set in /config)
   const bca = usePreorder().config.bca ?? { number: '', holder: '' }
   const [cash, setCash] = useState('')
@@ -136,7 +136,7 @@ export function CashierPage() {
     setPicking(null)
     setName('')
     setCash('')
-    setPay('tunai')
+    setPay('qris')
     setOrderId(newId())
     setError(null)
     setQrisSeen(false)
