@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useAnimate } from 'motion/react'
-import type { CSSProperties } from 'react'
+import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { Info } from 'lucide-react'
 import { DRINK_PROFILE, type Drink } from '../data/menu'
 import { spring } from '../lib/motion'
@@ -76,7 +76,7 @@ export function DrinkSpotlight({ drink, active, dimmed, onHover, soldOut = false
 
       <div className="mt-[0.6vh] flex w-full flex-col items-center text-center">
         {/* name with the price right beside it — one compact row */}
-        <div className="flex max-w-full items-center justify-center gap-[1.2vh]">
+        <div data-extent className="flex max-w-full items-center justify-center gap-[1.2vh]">
           <h3 className="min-w-0 font-display text-[clamp(1.1rem,3vh,2.1rem)] font-bold uppercase leading-[0.95] text-brown">{drink.name.replace('Pletok ', '')}</h3>
           {soldOut ? (
             <span className="shrink-0 font-display text-[3.4vh] font-bold text-brown/40 line-through decoration-terracotta decoration-[0.4vh]"><Morph text={`${drink.price}K`} /></span>
@@ -84,7 +84,7 @@ export function DrinkSpotlight({ drink, active, dimmed, onHover, soldOut = false
             <PriceTag price={drink.price} size="fluid" className="shrink-0" />
           )}
         </div>
-        <p className="mt-[0.6vh] flex max-w-full flex-wrap items-center justify-center gap-x-1.5 font-cond text-[clamp(0.75rem,1.75vh,1.05rem)] font-semibold italic leading-tight text-brown">
+        <p data-extent className="mt-[0.6vh] flex max-w-full flex-wrap items-center justify-center gap-x-1.5 font-cond text-[clamp(0.75rem,1.75vh,1.05rem)] font-semibold italic leading-tight text-brown">
           {drink.ingredients.map((ing, i) => (
             <span key={ing} className="flex items-center gap-x-1.5 whitespace-nowrap">
               {i > 0 && <span className="size-1 rounded-full" style={{ background: drink.accent }} />}
@@ -127,13 +127,37 @@ const TASTE: Array<[keyof (typeof DRINK_PROFILE)['original']['taste'], string]> 
  */
 function Profile({ drink, side }: { drink: Drink; side: 'left' | 'right' }) {
   const p = DRINK_PROFILE[drink.id]
+  // short screens (iPad, 1024×768): drop the least important parts until the card fits above the
+  // bundles strip — 1 = no "cocok buat", 2 = no upside line either. Taste + heads-up always stay.
+  const ref = useRef<HTMLElement>(null)
+  const [tight, setTight] = useState(0)
+  // snug against this drink's own content (cup, name + price, ingredients), however wide it renders
+  const [edge, setEdge] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    const col = ref.current?.parentElement
+    if (!col) return
+    const cr = col.getBoundingClientRect()
+    const k = col.offsetWidth / cr.width // undo the spotlight's scale
+    const xs = [...col.querySelectorAll<HTMLElement>('.cup, [data-extent]')].map((e) => e.getBoundingClientRect())
+    if (!xs.length) return
+    setEdge(side === 'right' ? (Math.max(...xs.map((r) => r.right)) - cr.left) * k : (cr.right - Math.min(...xs.map((r) => r.left))) * k)
+  }, [side])
+  useLayoutEffect(() => {
+    const el = ref.current
+    const room = el?.parentElement?.clientHeight
+    if (!el || !room || tight >= 2) return
+    if (el.offsetTop + el.offsetHeight > room) setTight((t) => t + 1)
+  }, [tight])
   const dx = side === 'right' ? -24 : 24
   const line = (i: number) => ({ initial: { opacity: 0, x: dx / 2 }, animate: { opacity: 1, x: 0 }, transition: { ...spring.snappy, delay: 0.12 + i * 0.07 } })
   return (
     <motion.aside
+      ref={ref}
       aria-label={`Tentang ${drink.name}`}
-      className="pointer-events-none absolute top-[4%] w-[94%] rounded-[2.2vh] border-2 bg-cream/95 p-[1.8vh] text-brown shadow-[0_24px_50px_-24px_rgb(58_28_15/0.6)] backdrop-blur-md"
-      style={{ [side === 'right' ? 'left' : 'right']: '88%', borderColor: `${drink.accent}55` } as CSSProperties}
+      data-profile
+      className="pointer-events-none absolute top-[4%] w-full rounded-[2.2vh] border-2 bg-cream/95 p-[1.8vh] text-brown shadow-[0_24px_50px_-24px_rgb(58_28_15/0.6)] backdrop-blur-md"
+      // over the neighbouring (dimmed) column, never over this drink's own name, price or ingredients
+      style={{ [side === 'right' ? 'left' : 'right']: edge === null ? 'calc(100% + 1.5vw)' : edge + 16, borderColor: `${drink.accent}55` } as CSSProperties}
       initial={{ opacity: 0, x: dx, scale: 0.94 }}
       animate={{ opacity: 1, x: 0, scale: 1 }}
       exit={{ opacity: 0, x: dx / 2, scale: 0.97, transition: { duration: 0.18 } }}
@@ -163,18 +187,24 @@ function Profile({ drink, side }: { drink: Drink; side: 'left' | 'right' }) {
         ))}
       </div>
 
-      <motion.p {...line(5)} className="mt-[1.3vh] font-cond text-[clamp(0.7rem,1.5vh,0.95rem)] font-semibold uppercase italic tracking-widest text-terracotta">Cocok buat</motion.p>
-      <motion.div {...line(6)} className="mt-[0.4vh] flex flex-wrap gap-[0.5vh]">
-        {p.goodFor.map((g) => (
-          <span key={g} className="rounded-full px-[1vh] py-[0.25vh] font-display text-[clamp(0.7rem,1.55vh,0.95rem)] font-semibold" style={{ background: `${drink.accent}1f` }}>
-            {g}
-          </span>
-        ))}
-      </motion.div>
+      {tight < 1 && (
+        <>
+          <motion.p {...line(5)} className="mt-[1.3vh] font-cond text-[clamp(0.7rem,1.5vh,0.95rem)] font-semibold uppercase italic tracking-widest text-terracotta">Cocok buat</motion.p>
+          <motion.div {...line(6)} className="mt-[0.4vh] flex flex-wrap gap-[0.5vh]">
+            {p.goodFor.map((g) => (
+              <span key={g} className="rounded-full px-[1vh] py-[0.25vh] font-display text-[clamp(0.7rem,1.55vh,0.95rem)] font-semibold" style={{ background: `${drink.accent}1f` }}>
+                {g}
+              </span>
+            ))}
+          </motion.div>
+        </>
+      )}
 
-      <motion.p {...line(7)} className="mt-[1.2vh] font-display text-[clamp(0.75rem,1.65vh,1rem)] leading-snug">
-        <b className="text-leaf">＋</b> {p.plus}
-      </motion.p>
+      {tight < 2 && (
+        <motion.p {...line(7)} className="mt-[1.2vh] font-display text-[clamp(0.75rem,1.65vh,1rem)] leading-snug">
+          <b className="text-leaf">＋</b> {p.plus}
+        </motion.p>
+      )}
       <motion.p {...line(8)} className="mt-[0.7vh] flex gap-[0.6vh] font-display text-[clamp(0.75rem,1.65vh,1rem)] leading-snug text-brown/80">
         <Info className="mt-[0.2vh] size-[1.1em] shrink-0 text-terracotta" /> {p.heads}
       </motion.p>

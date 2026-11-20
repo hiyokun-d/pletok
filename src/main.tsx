@@ -97,4 +97,17 @@ if (CREW.includes(path)) {
   // Safari has no requestIdleCallback
   const idle = (f: () => void) => (typeof requestIdleCallback === 'function' ? requestIdleCallback(f, { timeout: 3000 }) : setTimeout(f, 1500))
   idle(() => CREW.filter((p) => p !== path).forEach((p) => void PAGES[p]().catch(() => {})))
+  // the data too: queue + results stay warm on every crew page, so the next tab opens already filled
+  // (a page asking at the same moment shares the request — lib/backend `once`)
+  void import('./lib/backend').then(({ crewPin, fetchQueue, fetchResults }) => {
+    const warmUp = () => {
+      const pin = crewPin()
+      if (!pin || document.visibilityState !== 'visible') return
+      void fetchQueue(pin)
+      void fetchResults(pin)
+    }
+    setTimeout(warmUp, 4000)
+    setInterval(warmUp, 45_000)
+    document.addEventListener('visibilitychange', warmUp)
+  })
 }

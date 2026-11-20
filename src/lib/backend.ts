@@ -247,13 +247,48 @@ export interface Results {
   scans: Array<{ at: number; target: string }>
 }
 
+/*
+ * Crew data kept warm. Every crew page preloads the queue and the results in the background
+ * (main.tsx), so the page opened next starts on a copy that's seconds old instead of a spinner,
+ * then refreshes. Kept for this browser tab only (sessionStorage) — it holds customer names.
+ */
+const WARM = { queue: 'pletok:warm-queue', results: 'pletok:warm-results' } as const
+export function warm<K extends keyof typeof WARM>(k: K): { at: number; data: K extends 'queue' ? QueueOrder[] : Results } | null {
+  try {
+    return JSON.parse(sessionStorage.getItem(WARM[k]) ?? 'null')
+  } catch {
+    return null
+  }
+}
+const keepWarm = (k: keyof typeof WARM, data: unknown) => {
+  try {
+    sessionStorage.setItem(WARM[k], JSON.stringify({ at: Date.now(), data }))
+  } catch {
+    /* full or blocked — the page still loads it live */
+  }
+}
+// a page and the preloader asking at the same moment share one request (only while it's running,
+// so a load right after a save never gets an answer from before the save)
+const running = new Map<string, Promise<unknown>>()
+function once<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const had = running.get(key)
+  if (had) return had as Promise<T>
+  const p = run().finally(() => running.delete(key))
+  running.set(key, p)
+  return p
+}
+
 /** every answer, for the crew's /hasil page (needs the PIN) */
-export async function fetchResults(pin: string): Promise<Results | 'pin' | null> {
+export function fetchResults(pin: string): Promise<Results | 'pin' | null> {
+  return once(`results:${pin}`, () => loadResults(pin))
+}
+async function loadResults(pin: string): Promise<Results | 'pin' | null> {
   if (!BACKEND) return null
   try {
     const r = await fetch(BACKEND, { method: 'POST', body: JSON.stringify({ type: 'results', pin }) })
     const j = (await r.json()) as Results & { ok: boolean; error?: string }
     reportHealth(sheetOk(j))
+    if (j.ok) keepWarm('results', j)
     return j.ok ? j : j.error === 'pin' ? 'pin' : null
   } catch {
     reportHealth(false)
@@ -587,9 +622,12 @@ export interface QueueOrder {
   readyAt?: number
 }
 
-export async function fetchQueue(pin: string): Promise<QueueOrder[] | 'pin' | null> {
-  const r = await postJson<{ orders: QueueOrder[] }>({ type: 'queue', pin }, 1)
-  return r?.ok ? r.orders : r?.error === 'pin' ? 'pin' : null
+export function fetchQueue(pin: string): Promise<QueueOrder[] | 'pin' | null> {
+  return once(`queue:${pin}`, async () => {
+    const r = await postJson<{ orders: QueueOrder[] }>({ type: 'queue', pin }, 1)
+    if (r?.ok) keepWarm('queue', r.orders)
+    return r?.ok ? r.orders : r?.error === 'pin' ? 'pin' : null
+  })
 }
 
 export type BoothPay = 'tunai' | 'qris' | 'bca'

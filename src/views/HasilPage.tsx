@@ -4,7 +4,7 @@ import { ArrowRight, Banknote, Check, Coins, Crown, Landmark, QrCode, Download, 
 import { EVENT, SITE_URL } from '../data/event'
 import { DRINKS } from '../data/menu'
 import { AnimatePresence } from 'motion/react'
-import { BACKEND, crewPin, fetchProof, fetchQueue, fetchResults, saveMoneyHolders, updateOrder, type MoneyHolders, type Order, type OrderStatus, type PreorderPay, type QueueOrder, type Response, type Results, type SecurityEvent } from '../lib/backend'
+import { BACKEND, crewPin, warm, fetchProof, fetchQueue, fetchResults, saveMoneyHolders, updateOrder, type MoneyHolders, type Order, type OrderStatus, type PreorderPay, type QueueOrder, type Response, type Results, type SecurityEvent } from '../lib/backend'
 import { usePreorder } from '../hooks/usePreorder'
 import { PREORDER_ITEMS, rupiah } from '../data/preorder'
 import { spring } from '../lib/motion'
@@ -33,11 +33,11 @@ const pct = (n: number, of: number) => (of ? Math.round((n / of) * 100) : 0)
 
 export function HasilPage() {
   const [pin, setPin] = useState(DEMO ? 'demo' : crewPin)
-  const [data, setData] = useState<Results | null>(DEMO ? demoResults() : null)
+  const [data, setData] = useState<Results | null>(() => (DEMO ? demoResults() : (warm('results')?.data ?? null)))
   const [state, setState] = useState<'idle' | 'loading' | 'error' | 'pin'>('idle')
-  const [at, setAt] = useState<number | undefined>(DEMO ? Date.now() : undefined)
+  const [at, setAt] = useState<number | undefined>(() => (DEMO ? Date.now() : warm('results')?.at))
   // booth sales (/cashier), for the money cards — voided ones never come back
-  const [booth, setBooth] = useState<QueueOrder[] | null>(DEMO ? demoBooth() : null)
+  const [booth, setBooth] = useState<QueueOrder[] | null>(() => (DEMO ? demoBooth() : (warm('queue')?.data.filter((o) => o.src === 'booth') ?? null)))
   const { open: preorderOpen, config } = usePreorder()
   useCrewPage('Hasil')
 

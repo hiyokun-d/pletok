@@ -604,7 +604,7 @@ function ItemCard({
         </div>
         <div className="min-w-0 flex-1">
           <p className="font-display text-lg font-bold leading-tight">{i.name}</p>
-          <p className="truncate font-cond text-sm italic text-brown-soft">{i.detail}</p>
+          <p className="line-clamp-2 font-cond text-sm italic leading-snug text-brown-soft">{i.detail}</p>
           <p className="mt-0.5 flex flex-wrap items-baseline gap-x-2 font-display font-semibold text-terracotta">
             {promoPrice > 0 && promoPrice < i.price ? (
               <>

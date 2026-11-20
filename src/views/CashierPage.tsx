@@ -1,7 +1,7 @@
 import { AnimatePresence, motion, useAnimate } from 'motion/react'
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Banknote, Check, CloudOff, Copy, Download, Gift, HardDrive, RefreshCw, Landmark, Loader2, Minus, Plus, QrCode, ReceiptText, RotateCcw, ShoppingBasket, TriangleAlert, X } from 'lucide-react'
-import { BACKEND, crewPin, enqueue, fetchQueue, health, onHealth, sendBoothOrder, voidBoothOrder, type BoothLine, type BoothPay, type QueueOrder } from '../lib/backend'
+import { BACKEND, crewPin, warm, enqueue, fetchQueue, health, onHealth, sendBoothOrder, voidBoothOrder, type BoothLine, type BoothPay, type QueueOrder } from '../lib/backend'
 import { receiptUrl, tempCode, warmSeal, type PackedSale } from '../lib/saleCode'
 import { usePreorder } from '../hooks/usePreorder'
 import { useMenu } from '../hooks/useMenu'
@@ -56,6 +56,9 @@ export function CashierPage() {
 
   const [cart, setCart] = useState<Record<string, number>>({})
   const [name, setName] = useState('')
+  // taps on "Lunas" without a name — each one shakes the field, and the reminder gets firmer
+  const [needName, setNeedName] = useState(0)
+  const nameBox = useRef<HTMLInputElement>(null)
   const [pay, setPay] = useState<BoothPay>('tunai')
   // same account the pre-orders pay into (set in /config)
   const bca = usePreorder().config.bca ?? { number: '', holder: '' }
@@ -65,7 +68,7 @@ export function CashierPage() {
   const [error, setError] = useState<string | null>(null)
   // the sale just paid (or one re-opened from the history): its number + the receipt QR for the buyer
   const [done, setDone] = useState<{ id: string; code: string; name: string; at: number; sale: PackedSale; queued?: boolean; again?: boolean } | null>(null)
-  const [history, setHistory] = useState<QueueOrder[] | null>(null)
+  const [history, setHistory] = useState<QueueOrder[] | null>(() => warm('queue')?.data.filter((o) => o.src === 'booth').sort((a, b) => b.at - a.at) ?? null)
   // the Sheet didn't answer the last history load — the list comes from this phone's own log
   const [historyFailed, setHistoryFailed] = useState(false)
   // offline / Sheet down: what still works at the till
@@ -137,6 +140,7 @@ export function CashierPage() {
     setOrderId(newId())
     setError(null)
     setQrisSeen(false)
+    setNeedName(0)
   }
 
   const loadHistory = useCallback(async () => {
@@ -154,6 +158,14 @@ export function CashierPage() {
 
   const submit = async () => {
     if (!pin || !lines.length || sending) return
+    // the pickup crew calls people by name — no name, no sale
+    if (!name.trim()) {
+      setNeedName((n) => n + 1)
+      nameBox.current?.focus()
+      nameBox.current?.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-10px)' }, { transform: 'translateX(9px)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(3px)' }, { transform: 'translateX(0)' }], { duration: 380 })
+      navigator.vibrate?.([60, 40, 60])
+      return
+    }
     if (pay === 'tunai' && cash && change < 0) return setError('Uang yang diterima kurang dari total.')
     setSending(true)
     setError(null)
@@ -213,6 +225,7 @@ export function CashierPage() {
   return (
     <Shell>
       <CrewNav at="cashier" />
+      <LocalLog pin={pin} onSynced={loadHistory} />
       <ParticleField preset="burst" overrides={{ shape: 'sparkle', count: 50 }} points={[[window.innerWidth / 2, window.innerHeight * 0.35]]} burstKey={done?.at} />
 
       {/* no Sheet: the till keeps going — what works and how, in one place */}
@@ -363,12 +376,33 @@ export function CashierPage() {
             </AnimatePresence>
 
             <input
+              ref={nameBox}
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => (setName(e.target.value), setNeedName(0))}
               maxLength={60}
-              placeholder="Nama buat dipanggil (opsional)"
-              className="mt-3 w-full rounded-2xl bg-cream-deep/80 p-3 font-display outline-none focus:ring-2 focus:ring-terracotta"
+              required
+              autoCapitalize="words"
+              autoComplete="off"
+              aria-invalid={needName > 0}
+              aria-describedby="name-need"
+              placeholder="Nama pembeli — buat dipanggil"
+              className={`mt-3 w-full rounded-2xl bg-cream-deep/80 p-3 font-display outline-none focus:ring-2 focus:ring-terracotta ${needName ? 'ring-2 ring-terracotta' : ''}`}
             />
+            <AnimatePresence initial={false}>
+              {needName > 0 && (
+                <motion.p
+                  id="name-need"
+                  role="alert"
+                  key={needName >= 3 ? 'firm' : 'soft'}
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className={`mt-2 overflow-hidden rounded-2xl px-3 py-2 font-display text-sm ${needName >= 3 ? 'bg-terracotta font-semibold text-cream' : 'bg-terracotta/10 text-terracotta'}`}
+                >
+                  {needName >= 3 ? '✋ Stop dulu — tanya nama pembelinya. Tim pickup manggil pakai nama ini, tanpa nama pesanannya bisa ketuker.' : 'Tanya nama pembeli dulu ya — buat dipanggil waktu minumannya siap.'}
+                </motion.p>
+              )}
+            </AnimatePresence>
 
             <div className="mt-3 grid grid-cols-3 gap-1 rounded-2xl bg-brown/10 p-1">
               {(['tunai', 'qris', 'bca'] as const).map((p) => (
@@ -462,7 +496,7 @@ export function CashierPage() {
               className="mt-3 flex w-full items-center justify-center gap-2 rounded-full bg-terracotta py-4 font-display text-lg font-semibold text-cream shadow-[0_6px_0_#6e3418] disabled:bg-[#cfa98f] disabled:shadow-none"
             >
               {sending ? <Loader2 className="size-5 animate-spin" /> : <Check className="size-5" />}
-              {lines.length ? `Lunas · kirim ke pickup` : 'Pilih menu dulu'}
+              {!lines.length ? 'Pilih menu dulu' : name.trim() ? 'Lunas · kirim ke pickup' : 'Isi nama pembeli dulu'}
             </motion.button>
             {lines.length > 0 && (
               <button type="button" onClick={reset} className="mx-auto mt-2 flex items-center gap-1.5 font-display text-sm text-brown-soft">
@@ -473,7 +507,6 @@ export function CashierPage() {
         </section>
       </div>
 
-      <LocalLog pin={pin} onSynced={loadHistory} />
       <History
         onReceipt={(o) => setDone({ id: o.id, code: o.code, name: o.name, at: Date.now(), again: true, sale: { id: o.id, at: o.at, pay: /qris/i.test(o.pay) ? 'qris' : /bca/i.test(o.pay) ? 'bca' : 'tunai', name: o.name, lines: o.lines.map((l) => ({ ...l, drinks: l.drinks ?? [l.id] })) } })}
         orders={shown}
@@ -687,9 +720,10 @@ function History({ orders, offline, pin, total, onChange, onReceipt }: { onRecei
             <li key={o.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 font-display">
               <span className="w-16 font-bold text-terracotta">{o.code}</span>
               {o.local && <span className="flex items-center gap-1 rounded-full bg-[#e8b53a]/35 px-2 py-0.5 text-xs font-semibold"><CloudOff className="size-3" /> di HP ini</span>}
-              <span className="min-w-0 flex-1 truncate text-sm">
-                {o.lines.map((l) => `${l.qty}× ${l.name}`).join(', ')}
-                {o.name && <span className="text-brown-soft"> · {o.name}</span>}
+              {/* the name first — it's what the pickup crew calls out */}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-semibold">{o.name || <i className="font-normal text-brown/45">tanpa nama</i>}</span>
+                <span className="block truncate text-sm text-brown-soft">{o.lines.map((l) => `${l.qty}× ${l.name}`).join(', ')}</span>
               </span>
               <span className="font-cond text-sm italic text-brown/55">{hhmm(o.at)} · {o.pay}</span>
               <span className="w-20 text-right tabular-nums">{rupiah(o.total)}</span>
@@ -737,6 +771,7 @@ function LocalLog({ pin, onSynced }: { pin: string; onSynced: () => void }) {
   const sales = useSyncExternalStore(onLedger, ledger)
   const [checking, setChecking] = useState(false)
   const [result, setResult] = useState<Reconciled | 'fail' | null>(null)
+  const [open, setOpen] = useState(false)
   const pending = sales.filter((s) => s.state === 'pending')
   const inSheet = sales.filter((s) => s.state === 'sent').length
   useEffect(() => {
@@ -762,31 +797,50 @@ function LocalLog({ pin, onSynced }: { pin: string; onSynced: () => void }) {
     if (r && r !== 'pin') onSynced()
   }
   return (
-    <div className={`mt-8 rounded-3xl border-2 p-4 ${pending.length ? 'border-[#e8b53a] bg-[#e8b53a]/15' : 'border-brown/10 bg-cream/70'}`}>
-      <div className="flex flex-wrap items-center gap-3">
-        <span className={`grid size-10 shrink-0 place-items-center rounded-2xl ${pending.length ? 'bg-[#e8b53a] text-brown' : 'bg-leaf text-cream'}`}>
-          {pending.length ? <CloudOff className="size-5 animate-pulse" /> : <HardDrive className="size-5" />}
+    // a small bubble at the top; tap it for the check / download
+    <div className="relative z-20 -mt-2 mb-4 flex flex-col items-start">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className={`inline-flex items-center gap-2 rounded-full py-1.5 pl-1.5 pr-3.5 font-display text-sm shadow-sm ring-1 ${pending.length ? 'bg-[#e8b53a]/25 ring-[#e8b53a]' : 'bg-cream/80 ring-brown/10'}`}
+      >
+        <span className={`grid size-7 place-items-center rounded-full ${pending.length ? 'bg-[#e8b53a] text-brown' : 'bg-leaf text-cream'}`}>
+          {pending.length ? <CloudOff className="size-4 animate-pulse" /> : <HardDrive className="size-4" />}
         </span>
-        <div className="min-w-0 flex-1 font-display">
-          <p className="font-bold leading-tight">Catatan kasir di HP ini</p>
-          <p className="font-cond text-sm italic text-brown-soft">
-            {sales.length} penjualan · {inSheet} sudah di Sheet{pending.length > 0 && <b className="not-italic text-terracotta"> · {pending.length} belum — dikirim otomatis</b>}
-          </p>
-        </div>
-        <button type="button" onClick={() => void check()} disabled={checking} className="inline-flex items-center gap-1.5 rounded-full bg-brown px-3.5 py-2 font-display text-sm font-semibold text-cream disabled:opacity-60">
-          {checking ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />} Cek ulang dengan Sheet
-        </button>
-        <button type="button" onClick={downloadLedger} aria-label="Unduh catatan HP ini (CSV)" className="grid size-9 place-items-center rounded-full border-2 border-brown/15">
-          <Download className="size-4" />
-        </button>
-      </div>
-      {result && (
-        <p className={`mt-3 rounded-2xl px-3 py-2 font-display text-sm ${result === 'fail' ? 'bg-terracotta/10 text-terracotta' : result.left ? 'bg-[#e8b53a]/30' : 'bg-leaf/15 text-leaf'}`}>
-          {result === 'fail'
-            ? 'Sheet belum bisa dihubungi — catatan tetap aman di HP ini, coba lagi sebentar.'
-            : `Dicek ${hhmm(result.at)}: ${result.matched} cocok dengan Sheet${result.resent ? ` · ${result.resent} yang belum masuk sudah dikirim` : ''}${result.left ? ` · ${result.left} masih menunggu` : result.resent ? '' : ' · tidak ada yang dobel / hilang'}`}
-        </p>
-      )}
+        <span className="font-semibold">{sales.length} penjualan di HP ini</span>
+        <span className="font-cond italic text-brown-soft">· {pending.length ? <b className="not-italic text-terracotta">{pending.length} belum di Sheet</b> : 'semua di Sheet'}</span>
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -6, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.97 }}
+            transition={{ duration: 0.18 }}
+            className="absolute left-0 top-full mt-2 w-[min(24rem,calc(100vw-2rem))] origin-top-left rounded-3xl bg-cream p-4 font-display shadow-[0_20px_50px_-20px_rgb(58_28_15/0.5)] ring-1 ring-brown/10"
+          >
+            <p className="text-sm">
+              {sales.length} penjualan · {inSheet} sudah di Sheet{pending.length > 0 && <b className="text-terracotta"> · {pending.length} belum — dikirim otomatis</b>}
+            </p>
+            <div className="mt-3 flex items-center gap-2">
+              <button type="button" onClick={() => void check()} disabled={checking} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full bg-brown px-3.5 py-2 text-sm font-semibold text-cream disabled:opacity-60">
+                {checking ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />} Cek ulang dengan Sheet
+              </button>
+              <button type="button" onClick={downloadLedger} aria-label="Unduh catatan HP ini (CSV)" className="grid size-9 place-items-center rounded-full border-2 border-brown/15">
+                <Download className="size-4" />
+              </button>
+            </div>
+            {result && (
+              <p className={`mt-3 rounded-2xl px-3 py-2 text-sm ${result === 'fail' ? 'bg-terracotta/10 text-terracotta' : result.left ? 'bg-[#e8b53a]/30' : 'bg-leaf/15 text-leaf'}`}>
+                {result === 'fail'
+                  ? 'Sheet belum bisa dihubungi — catatan tetap aman di HP ini, coba lagi sebentar.'
+                  : `Dicek ${hhmm(result.at)}: ${result.matched} cocok dengan Sheet${result.resent ? ` · ${result.resent} yang belum masuk sudah dikirim` : ''}${result.left ? ` · ${result.left} masih menunggu` : result.resent ? '' : ' · tidak ada yang dobel / hilang'}`}
+              </p>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

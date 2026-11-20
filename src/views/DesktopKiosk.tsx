@@ -140,8 +140,27 @@ function MenuCarousel() {
 function StoryRotator({ compact = false }: { compact?: boolean }) {
   const [idx] = useCycle(STORY.length, 9000)
   const f = STORY[idx]
+  // as many WHOLE lines of the story as the space holds (ending in "…") — never a line cut in half
+  const box = useRef<HTMLDivElement>(null)
+  const head = useRef<HTMLDivElement>(null)
+  const [lines, setLines] = useState(compact ? 3 : 8)
+  useEffect(() => {
+    const el = box.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const fit = () => {
+      const body = el.querySelector<HTMLElement>('[data-body]')
+      if (!body || !head.current) return
+      const lh = parseFloat(getComputedStyle(body).lineHeight) || 20
+      const room = el.clientHeight - head.current.offsetHeight - parseFloat(getComputedStyle(body).marginTop)
+      setLines(Math.max(0, Math.min(compact ? 3 : 12, Math.floor(room / lh))))
+    }
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [compact, idx])
   return (
-    <div className="relative min-h-0 flex-1 overflow-hidden [mask-image:linear-gradient(to_bottom,black_72%,transparent)]">
+    <div ref={box} className="relative min-h-0 flex-1 overflow-hidden">
       <AnimatePresence mode="wait">
         <motion.div
           key={idx}
@@ -151,9 +170,17 @@ function StoryRotator({ compact = false }: { compact?: boolean }) {
           transition={spring.glide}
           style={{ transformPerspective: 600 }}
         >
-          <p className="font-cond text-[clamp(0.65rem,1.4vh,0.85rem)] font-semibold uppercase italic tracking-widest text-terracotta">Tahukah kamu? · {f.kicker}</p>
-          <p className="mt-[0.5vh] font-display text-[clamp(1rem,2.4vh,1.5rem)] font-bold leading-tight text-brown">{f.title}</p>
-          <p className={`mt-[0.6vh] font-display text-[clamp(0.8rem,1.75vh,1.05rem)] leading-relaxed text-brown/80 ${compact ? 'line-clamp-3' : ''}`}>{f.body}</p>
+          <div ref={head}>
+            <p className="font-cond text-[clamp(0.65rem,1.4vh,0.85rem)] font-semibold uppercase italic tracking-widest text-terracotta">Tahukah kamu? · {f.kicker}</p>
+            <p className="mt-[0.5vh] font-display text-[clamp(1rem,2.4vh,1.5rem)] font-bold leading-tight text-brown">{f.title}</p>
+          </div>
+          <p
+            data-body
+            className="mt-[0.6vh] overflow-hidden font-display text-[clamp(0.8rem,1.75vh,1.05rem)] leading-relaxed text-brown/80"
+            style={{ display: lines ? '-webkit-box' : 'none', WebkitBoxOrient: 'vertical', WebkitLineClamp: lines }}
+          >
+            {f.body}
+          </p>
         </motion.div>
       </AnimatePresence>
     </div>

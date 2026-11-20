@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowRight, Banknote, Calculator, Check, Coins, CupSoda, Download, FileText, HandCoins, Landmark, Loader2, Plus, QrCode, RefreshCw, Scale, ShieldAlert, Target, Trash2, TrendingUp, Users, Wallet, X } from 'lucide-react'
-import { BACKEND, crewPin, fetchQueue, fetchResults, makeFinanceReport, saveClosing, saveFinance, type ClosingCount, type CostLine, type FinanceConfig, type MoneyHolders, type Order, type QueueOrder } from '../lib/backend'
+import { BACKEND, crewPin, warm, fetchQueue, fetchResults, makeFinanceReport, saveClosing, saveFinance, type ClosingCount, type CostLine, type FinanceConfig, type MoneyHolders, type Order, type QueueOrder } from '../lib/backend'
 import { DEFAULT_FINANCE, KAS, POT_IDS, byHour, heldIn, idr, salesOf, settle, summarize, type Pot, type Summary } from '../lib/finance'
 import { DRINKS } from '../data/menu'
 import { EVENT } from '../data/event'
@@ -32,13 +32,15 @@ const digits = (v: string) => Number(v.replace(/\D/g, '').slice(0, 10)) || 0
 
 export function FinancialPage() {
   const [pin, setPin] = useState(DEMO ? 'demo' : crewPin)
-  const [orders, setOrders] = useState<Order[] | null>(DEMO ? [] : null)
-  const [booth, setBooth] = useState<QueueOrder[] | null>(DEMO ? demoBooth() : null)
-  const [finance, setFinance] = useState<FinanceConfig | null>(DEMO ? DEFAULT_FINANCE : null)
-  const [closing, setClosing] = useState<Partial<Record<Pot, ClosingCount>>>({})
-  const [holders, setHolders] = useState<MoneyHolders>(DEMO ? { tunai: 'Nabil', bca: 'Calvin', qris: 'Elisha' } : { bca: '', qris: '', tunai: '' })
+  // starts on the copy the other crew pages preloaded, then refreshes
+  const [first] = useState(() => (DEMO ? null : warm('results')))
+  const [orders, setOrders] = useState<Order[] | null>(DEMO ? [] : (first?.data.orders ?? null))
+  const [booth, setBooth] = useState<QueueOrder[] | null>(() => (DEMO ? demoBooth() : (warm('queue')?.data.filter((o) => o.src === 'booth') ?? null)))
+  const [finance, setFinance] = useState<FinanceConfig | null>(DEMO ? DEFAULT_FINANCE : first ? (first.data.finance ?? DEFAULT_FINANCE) : null)
+  const [closing, setClosing] = useState<Partial<Record<Pot, ClosingCount>>>(first?.data.closing ?? {})
+  const [holders, setHolders] = useState<MoneyHolders>(DEMO ? { tunai: 'Nabil', bca: 'Calvin', qris: 'Elisha' } : (first?.data.money ?? { bca: '', qris: '', tunai: '' }))
   const [state, setState] = useState<'idle' | 'loading' | 'error' | 'pin'>('idle')
-  const [at, setAt] = useState<number | undefined>(DEMO ? Date.now() : undefined)
+  const [at, setAt] = useState<number | undefined>(DEMO ? Date.now() : first?.at)
   useCrewPage('Financial')
 
   const load = useCallback(async () => {
