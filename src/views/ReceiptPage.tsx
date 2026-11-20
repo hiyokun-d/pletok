@@ -5,6 +5,7 @@ import { fetchReceipt, type BoothReceipt } from '../lib/backend'
 import { rupiah } from '../data/preorder'
 import { ADMIN_WA, adminChat } from '../data/event'
 import { hhmm } from './adminUi'
+import { chime, unlockAudio } from '../lib/chime'
 
 /*
  * /r/<sale id> — the buyer's receipt, opened from the QR the cashier shows after "Lunas".
@@ -39,26 +40,6 @@ function cached(id: string): BoothReceipt | null {
     return JSON.parse(localStorage.getItem(`${SAVED}:${id}`) ?? 'null')
   } catch {
     return null
-  }
-}
-
-/** a short two-note chime, made on the spot (no sound file to load) */
-function chime() {
-  try {
-    const ac = new AudioContext()
-    ;[880, 1320].forEach((f, i) => {
-      const o = ac.createOscillator()
-      const g = ac.createGain()
-      o.frequency.value = f
-      g.gain.setValueAtTime(0.0001, ac.currentTime + i * 0.22)
-      g.gain.exponentialRampToValueAtTime(0.4, ac.currentTime + i * 0.22 + 0.02)
-      g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + i * 0.22 + 0.5)
-      o.connect(g).connect(ac.destination)
-      o.start(ac.currentTime + i * 0.22)
-      o.stop(ac.currentTime + i * 0.22 + 0.55)
-    })
-  } catch {
-    /* no audio — the vibration and the screen still say it */
   }
 }
 
@@ -124,6 +105,7 @@ export function ReceiptPage({ id }: { id: string }) {
   // the tap that unlocks sound + notifications (browsers only allow them after one)
   const arm = async () => {
     setArmed(true)
+    unlockAudio()
     chime()
     try {
       if ('Notification' in window && Notification.permission === 'default') await Notification.requestPermission()

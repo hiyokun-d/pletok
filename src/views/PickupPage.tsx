@@ -1,10 +1,11 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BellRing, Check, CupSoda, HandPlatter, KeyRound, Loader2, RotateCcw, Search, ShieldAlert, ShieldCheck, StickyNote, WifiOff } from 'lucide-react'
+import { Bell, BellOff, BellRing, Check, CupSoda, Focus, HandPlatter, KeyRound, LayoutGrid, Loader2, RotateCcw, Search, ShieldAlert, ShieldCheck, StickyNote, UserRoundCheck, WifiOff } from 'lucide-react'
 import { BACKEND, crewPin, enqueue, fetchQueue, markPickedUp, markReady, pickUpPreorder, proofMatches, type QueueOrder } from '../lib/backend'
 import { PREORDER_ITEMS } from '../data/preorder'
 import { DRINKS } from '../data/menu'
 import { CrewNav, Empty, PinGate, Shell, hhmm, useCrewPage } from './adminUi'
+import { chime, unlockAudio } from '../lib/chime'
 
 /*
  * /pickup — the hand-over counter. Every paid order waits here: verified pre-orders (PLT-001…)
@@ -12,9 +13,31 @@ import { CrewNav, Empty, PinGate, Shell, hhmm, useCrewPage } from './adminUi'
  * A pre-order's PLT number is easy to guess, so it's only handed over with a second proof: its
  * kode cek, or the last 4 digits of the WhatsApp number it was ordered with (a friend picking up
  * gets both from the forwarded WhatsApp message).
+ *
+ * New cashier sales ring this device (chime + vibrate + a toast; a system notification and a count
+ * in the tab title when the screen is elsewhere) — switched on with the bell, since a browser only
+ * plays sound after a tap. "Mode fokus" hides the board: one big number box → that one order →
+ * its proof, with "Cek ulang" to check again, for the person standing at the counter.
  */
 
 const REFRESH_MS = 5_000
+const SOUND_KEY = 'pletok:pickup-sound'
+const FOCUS_KEY = 'pletok:pickup-focus'
+const stored = (k: string) => {
+  try {
+    return localStorage.getItem(k) === '1'
+  } catch {
+    return false
+  }
+}
+const store = (k: string, on: boolean) => {
+  try {
+    localStorage.setItem(k, on ? '1' : '0')
+  } catch {
+    /* fine — it just won't be remembered */
+  }
+}
+const itemsOf = (o: QueueOrder) => o.lines.map((l) => `${l.qty}× ${l.name}`).join(', ')
 type Filter = 'all' | 'po' | 'booth'
 
 /** the cups an order line takes to make — bundles count each drink in them */
@@ -36,6 +59,57 @@ export function PickupPage() {
   const [fresh, setFresh] = useState<Set<string>>(new Set())
   // bad news from the Sheet after a hand-over (picked up twice, proof refused) — stays until tapped away
   const [alert, setAlert] = useState<string | null>(null)
+  // new-sale ring (needs one tap to unlock sound) and the focus desk
+  const [sound, setSound] = useState(() => stored(SOUND_KEY))
+  const soundRef = useRef(sound)
+  soundRef.current = sound
+  const [focus, setFocus] = useState(() => stored(FOCUS_KEY))
+  const [toast, setToast] = useState<QueueOrder[]>([])
+  const [unseen, setUnseen] = useState(0)
+
+  const toggleSound = async () => {
+    const on = !sound
+    setSound(on)
+    store(SOUND_KEY, on)
+    if (!on) return
+    unlockAudio()
+    chime([660, 990])
+    try {
+      if ('Notification' in window && Notification.permission === 'default') await Notification.requestPermission()
+    } catch {
+      /* the chime + toast still work */
+    }
+  }
+  const toggleFocus = () => {
+    setFocus((f) => (store(FOCUS_KEY, !f), !f))
+  }
+
+  // new cashier sales: ring, toast, and when the screen is elsewhere a notification + tab count
+  const announce = useCallback((added: QueueOrder[]) => {
+    setToast(added)
+    window.setTimeout(() => setToast((t) => (t === added ? [] : t)), 6000)
+    if (!soundRef.current) return
+    chime([988, 1319, 1568], 0.15)
+    navigator.vibrate?.([200, 80, 200])
+    if (document.visibilityState === 'hidden') {
+      setUnseen((n) => n + added.length)
+      try {
+        if ('Notification' in window && Notification.permission === 'granted')
+          new Notification(added.length > 1 ? `${added.length} pesanan kasir baru` : `Pesanan baru ${added[0].code}`, { body: added.map((o) => `${o.code}: ${itemsOf(o)}`).join('\n'), tag: 'pletok-pickup' })
+      } catch {
+        /* some phones only notify from a service worker */
+      }
+    }
+  }, [])
+  useEffect(() => {
+    const seenNow = () => document.visibilityState === 'visible' && setUnseen(0)
+    document.addEventListener('visibilitychange', seenNow)
+    return () => document.removeEventListener('visibilitychange', seenNow)
+  }, [])
+  useEffect(() => {
+    const base = 'Pickup · Pletok'
+    document.title = unseen ? `(${unseen}) 🔔 ${base}` : base
+  }, [unseen])
 
   const load = useCallback(async () => {
     if (!pin) return
@@ -44,12 +118,14 @@ export function PickupPage() {
     setOffline(!r)
     if (!r) return
     if (seen.current) {
-      const added = r.filter((o) => !o.done && !seen.current!.has(o.id)).map((o) => o.id)
-      if (added.length) setFresh((f) => new Set([...f, ...added]))
+      const added = r.filter((o) => !o.done && !seen.current!.has(o.id))
+      if (added.length) setFresh((f) => new Set([...f, ...added.map((o) => o.id)]))
+      const booth = added.filter((o) => o.src === 'booth')
+      if (booth.length) announce(booth)
     }
     seen.current = new Set(r.map((o) => o.id))
     setOrders(r)
-  }, [pin])
+  }, [pin, announce])
   useEffect(() => {
     void load()
     const t = window.setInterval(() => void load(), REFRESH_MS)
@@ -116,12 +192,52 @@ export function PickupPage() {
             {waiting.length}
           </motion.span>
         </h1>
-        {offline && (
-          <span className="flex items-center gap-1.5 rounded-full bg-terracotta/10 px-3 py-1 font-cond text-sm italic text-terracotta">
-            <WifiOff className="size-4" /> Sinyal putus — mencoba lagi
-          </span>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {offline && (
+            <span className="flex items-center gap-1.5 rounded-full bg-terracotta/10 px-3 py-1 font-cond text-sm italic text-terracotta">
+              <WifiOff className="size-4" /> Sinyal putus
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => void toggleSound()}
+            aria-pressed={sound}
+            className={`flex items-center gap-1.5 rounded-full px-3.5 py-2 font-display text-sm font-semibold ${sound ? 'bg-leaf text-cream' : 'border-2 border-terracotta/50 text-terracotta'}`}
+          >
+            {sound ? <Bell className="size-4" /> : <BellOff className="size-4" />} {sound ? 'Notif ON' : 'Nyalakan notif'}
+          </button>
+          <button
+            type="button"
+            onClick={toggleFocus}
+            aria-pressed={focus}
+            className={`flex items-center gap-1.5 rounded-full px-3.5 py-2 font-display text-sm font-semibold ${focus ? 'bg-brown text-cream' : 'border-2 border-brown/15'}`}
+          >
+            {focus ? <LayoutGrid className="size-4" /> : <Focus className="size-4" />} {focus ? 'Semua kartu' : 'Mode fokus'}
+          </button>
+        </div>
       </div>
+
+      {/* new cashier sales */}
+      <AnimatePresence>
+        {toast.length > 0 && (
+          <motion.button
+            type="button"
+            onClick={() => setToast([])}
+            initial={{ y: -60, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -60, opacity: 0 }}
+            className="fixed inset-x-3 top-3 z-50 flex items-center gap-3 rounded-2xl bg-[#e8b53a] p-3.5 text-left font-display text-brown shadow-2xl sm:inset-x-auto sm:left-1/2 sm:w-[28rem] sm:-translate-x-1/2"
+          >
+            <motion.span animate={{ rotate: [0, -14, 14, -8, 8, 0] }} transition={{ duration: 0.8 }}>
+              <BellRing className="size-6" />
+            </motion.span>
+            <span className="min-w-0 flex-1">
+              <b>{toast.length > 1 ? `${toast.length} pesanan kasir baru` : `Pesanan baru ${toast[0].code}`}</b>
+              <span className="block truncate text-sm">{toast.map((o) => `${o.code}: ${itemsOf(o)}`).join(' · ')}</span>
+            </span>
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {alert && (
@@ -141,6 +257,17 @@ export function PickupPage() {
         )}
       </AnimatePresence>
 
+      {focus ? (
+        <FocusDesk
+          orders={orders ? all : null}
+          waiting={all.filter((o) => !o.done).length}
+          pin={pin}
+          onAlert={setAlert}
+          onBooth={(o) => mark(o, true)}
+          onDone={(id, by, done) => setOrders((os) => os?.map((x) => (x.id === id ? { ...x, done, pickedBy: by } : x)) ?? os)}
+        />
+      ) : (
+        <>
       {/* how a pre-order is handed over, in one line */}
       <p className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-2xl bg-leaf/10 px-3 py-2 font-display text-sm">
         <ShieldCheck className="size-4 shrink-0 text-leaf" />
@@ -303,6 +430,8 @@ export function PickupPage() {
           )}
         </>
       )}
+        </>
+      )}
     </Shell>
   )
 }
@@ -317,7 +446,7 @@ type Match = 'kode cek' | '4 digit WA' | 'unknown' | null
  * Either way the Sheet is told in the background, writes down how it was checked, and refuses a
  * second pickup of the same order (that comes back as an alert) — the one rule that's never optional.
  */
-function HandOver({ order: o, pin, onDone, onAlert }: { order: QueueOrder; pin: string; onDone: (by: string, done: boolean) => void; onAlert: (text: string) => void }) {
+function HandOver({ order: o, pin, onDone, onAlert, autoFocus = false }: { order: QueueOrder; pin: string; onDone: (by: string, done: boolean) => void; onAlert: (text: string) => void; autoFocus?: boolean }) {
   const [typed, setTyped] = useState('')
   const [match, setMatch] = useState<Match>(null)
   const [busy, setBusy] = useState(false)
@@ -387,6 +516,7 @@ function HandOver({ order: o, pin, onDone, onAlert }: { order: QueueOrder; pin: 
             setNameCheck(false)
           }}
           onKeyDown={(e) => e.key === 'Enter' && void handOver()}
+          autoFocus={autoFocus}
           autoCapitalize="characters"
           autoComplete="off"
           autoCorrect="off"
@@ -431,6 +561,205 @@ function HandOver({ order: o, pin, onDone, onAlert }: { order: QueueOrder; pin: 
           {proven ? `Cocok (${match}) · Serahkan` : match === 'unknown' ? 'Cek & serahkan' : p ? 'Ketik sampai lengkap…' : nameCheck ? 'Namanya cocok · Serahkan' : 'Serahkan (cek nama)'}
         </motion.button>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Mode fokus: no board, just the person at the counter. Number → that one order (pre-order or
+ * kasir) → its proof → hand over. "Cek ulang" clears the proof to try again; an order that's already
+ * gone shows a red stop with when and how it was taken.
+ */
+function FocusDesk({
+  orders,
+  waiting,
+  pin,
+  onAlert,
+  onDone,
+  onBooth,
+}: {
+  orders: QueueOrder[] | null
+  waiting: number
+  pin: string
+  onAlert: (t: string) => void
+  onDone: (id: string, by: string, done: boolean) => void
+  onBooth: (o: QueueOrder) => Promise<void>
+}) {
+  const [src, setSrc] = useState<'po' | 'booth'>('po')
+  const [num, setNum] = useState('')
+  // bumping it remounts the proof box: "Cek ulang"
+  const [round, setRound] = useState(0)
+  // handed over just now — show the green "done", not the red "already taken"
+  const [handed, setHanded] = useState<{ o: QueueOrder; by: string } | null>(null)
+  const numRef = useRef<HTMLInputElement>(null)
+  const n = Number(num)
+  const found = num ? (orders ?? []).filter((o) => o.src === src && Number(o.code.replace(/\D/g, '')) === n) : []
+  const o = found[0]
+  const prefix = src === 'po' ? 'PLT-' : 'B-'
+
+  const next = () => {
+    setNum('')
+    setHanded(null)
+    setRound((r) => r + 1)
+    window.setTimeout(() => numRef.current?.focus(), 50)
+  }
+  // the green "done" clears itself for the next person
+  useEffect(() => {
+    if (!handed) return
+    const t = window.setTimeout(next, 4000)
+    return () => window.clearTimeout(t)
+  }, [handed])
+
+  return (
+    <div className="mx-auto max-w-lg">
+      <p className="mb-3 text-center font-cond text-sm italic text-brown-soft">{waiting} pesanan menunggu · sebut nomornya, lalu cek</p>
+
+      {/* 1 · the number */}
+      <div className="rounded-[2rem] border-2 border-brown/10 bg-cream p-4">
+        <div className="mb-3 grid grid-cols-2 gap-1 rounded-2xl bg-brown/10 p-1">
+          {(
+            [
+              ['po', 'PLT · Pre-order'],
+              ['booth', 'B · Kasir'],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => {
+                setSrc(id)
+                setHanded(null)
+                setRound((r) => r + 1)
+                numRef.current?.focus()
+              }}
+              className={`rounded-xl py-2.5 font-display font-semibold ${src === id ? 'bg-brown text-cream' : ''}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <label className="flex items-center gap-1 rounded-2xl bg-cream-deep/80 px-4 py-3 focus-within:ring-2 focus-within:ring-terracotta">
+          <span className="font-display text-4xl font-bold text-terracotta/60">{prefix}</span>
+          <input
+            ref={numRef}
+            autoFocus
+            value={num}
+            onChange={(e) => {
+              setNum(e.target.value.replace(/\D/g, '').slice(0, 4))
+              setHanded(null)
+              setRound((r) => r + 1)
+            }}
+            inputMode="numeric"
+            placeholder="007"
+            aria-label={`Nomor ${prefix}`}
+            className="w-full min-w-0 bg-transparent font-display text-4xl font-bold tracking-wider text-terracotta outline-none placeholder:text-brown/25"
+          />
+          {num && (
+            <button type="button" onClick={next} className="shrink-0 rounded-full border-2 border-brown/15 px-3 py-1.5 font-display text-sm font-semibold">
+              Hapus
+            </button>
+          )}
+        </label>
+      </div>
+
+      {/* 2 · that order */}
+      <AnimatePresence mode="wait">
+        {handed ? (
+          <motion.div key="handed" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ opacity: 0 }} className="mt-4 rounded-[2rem] bg-leaf p-6 text-center font-display text-cream shadow-[0_8px_0_#3f5426]">
+            <UserRoundCheck className="mx-auto size-14" />
+            <p className="mt-2 text-4xl font-bold">{handed.o.code}</p>
+            <p className="text-xl font-semibold">Serahkan ✓ {handed.o.name}</p>
+            <p className="mt-1 text-sm text-cream/85">{itemsOf(handed.o)} · {handed.by}</p>
+            <button type="button" onClick={next} className="mt-5 w-full rounded-full bg-cream py-3 font-semibold text-leaf">
+              Pelanggan berikutnya
+            </button>
+          </motion.div>
+        ) : !num ? null : !orders ? (
+          <p key="load" className="mt-4 flex items-center justify-center gap-2 font-cond italic text-brown/55"><Loader2 className="size-4 animate-spin" /> Memuat antrean…</p>
+        ) : !o ? (
+          <motion.div key="none" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mt-4 rounded-[2rem] border-2 border-dashed border-terracotta/40 p-6 text-center font-display">
+            <ShieldAlert className="mx-auto size-10 text-terracotta" />
+            <p className="mt-2 text-xl font-bold">{prefix}{num.padStart(3, '0')} tidak ada</p>
+            <p className="mt-1 text-sm text-brown-soft">Salah nomor, belum dibayar / belum diverifikasi admin, atau {src === 'po' ? 'ternyata pesanan kasir (B)' : 'ternyata pre-order (PLT)'}.</p>
+          </motion.div>
+        ) : o.done ? (
+          <motion.div key={`taken-${o.id}`} initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="mt-4 rounded-[2rem] bg-terracotta p-6 text-center font-display text-cream">
+            <ShieldAlert className="mx-auto size-12 animate-pulse" />
+            <p className="mt-2 text-4xl font-bold">{o.code}</p>
+            <p className="text-2xl font-bold">SUDAH DIAMBIL</p>
+            <p className="mt-1 text-sm text-cream/85">{o.name || 'Tanpa nama'} · {itemsOf(o)}{o.pickedBy ? ` · ${o.pickedBy}` : ''}</p>
+            <p className="mt-3 rounded-2xl bg-cream/15 p-3 text-sm">Jangan diserahkan lagi. Kalau orangnya ngotot, panggil admin.</p>
+            <button type="button" onClick={next} className="mt-4 w-full rounded-full bg-cream py-3 font-semibold text-terracotta">
+              Pelanggan berikutnya
+            </button>
+          </motion.div>
+        ) : (
+          <motion.div key={`o-${o.id}`} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="mt-4 rounded-[2rem] border-2 border-brown/10 bg-cream p-5">
+            <div className="flex items-start justify-between gap-3 font-display">
+              <div>
+                <p className="text-4xl font-bold leading-none text-terracotta">{o.code}</p>
+                <p className="mt-1 text-xl font-semibold">{o.name || 'Tanpa nama'}</p>
+              </div>
+              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold text-cream ${o.src === 'po' ? 'bg-leaf' : 'bg-brown'}`}>{o.src === 'po' ? 'Pre-order' : `Kasir · ${o.pay}`}</span>
+            </div>
+            <ul className="mt-3 flex flex-col gap-0.5 border-t-2 border-dashed border-brown/15 pt-3 font-display">
+              {o.lines.map((l, k) => {
+                const cups = cupsOf(l)
+                return (
+                  <li key={k}>
+                    <span className="text-lg font-bold">{l.qty}×</span> {l.name}
+                    {cups.length > 1 && <span className="block font-cond text-sm italic text-brown-soft">{cups.map((c) => DRINKS.find((d) => d.id === c)?.short ?? c).join(' + ')}</span>}
+                  </li>
+                )
+              })}
+            </ul>
+            {o.note && <p className="mt-2 rounded-xl bg-[#e8b53a]/20 px-3 py-2 font-display text-sm"><StickyNote className="mr-1 inline size-4" />{o.note}</p>}
+
+            {/* 3 · the proof */}
+            {o.src === 'po' ? (
+              <HandOver
+                key={`${o.id}-${round}`}
+                order={o}
+                pin={pin}
+                autoFocus
+                onAlert={onAlert}
+                onDone={(by, done) => {
+                  onDone(o.id, by, done)
+                  if (done) setHanded({ o, by })
+                }}
+              />
+            ) : (
+              <>
+                {o.ref && (
+                  <p className="mt-4 flex items-center justify-between rounded-2xl bg-brown/[0.06] px-4 py-3 font-display">
+                    <span className="text-sm text-brown-soft">Cocokkan dengan struk di HP-nya</span>
+                    <b className="text-2xl tracking-[0.2em]">{o.ref}</b>
+                  </p>
+                )}
+                <p className="mt-2 font-cond text-sm italic text-brown-soft">Struk asli: jam di halamannya berdetik & segelnya berputar.</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void onBooth(o)
+                    setHanded({ o, by: 'struk' })
+                  }}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-full bg-leaf py-4 font-display text-lg font-semibold text-cream shadow-[0_5px_0_#3f5426]"
+                >
+                  <Check className="size-5" /> Cocok · Serahkan
+                </button>
+              </>
+            )}
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setRound((r) => r + 1)} className="flex items-center justify-center gap-1.5 rounded-full border-2 border-brown/15 py-2.5 font-display text-sm font-semibold">
+                <RotateCcw className="size-4" /> Cek ulang
+              </button>
+              <button type="button" onClick={next} className="rounded-full border-2 border-brown/15 py-2.5 font-display text-sm font-semibold">
+                Pelanggan berikutnya
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
