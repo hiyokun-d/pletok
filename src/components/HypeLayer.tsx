@@ -64,8 +64,8 @@ export function HypeLayer() {
       setBursts((b) => b.map((v, i) => (i === id % 3 ? { key: now, pts: [[x, y]] } : v)))
 
       const root = document.getElementById('root')
-      // only on one-screen layouts — on the long phone page the shake would jump fixed bars around
-      if (root && document.documentElement.scrollHeight <= H + 4) animate(root, { x: [0, -7, 6, -4, 0], rotate: [0, -0.35, 0.3, 0] }, { duration: 0.28 })
+      // only on one-screen layouts — on the long phone page the pulse would jump fixed bars around
+      if (root && document.documentElement.scrollHeight <= H + 4) animate(root, { scale: [1, 1.012, 1] }, { duration: 0.4, ease: [0.22, 1, 0.36, 1] })
     })
     return () => {
       off()

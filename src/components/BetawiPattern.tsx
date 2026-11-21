@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, type ReactNode } from 'react'
 
 /*
  * Betawi & Nusantara ornament, drawn here as plain SVG patterns (no pictures, any size):
@@ -78,12 +78,13 @@ export function Kawung({ className = '', color = '#f1d3a8', size = 64 }: { class
 }
 
 /** the carved double door of a Betawi house — closed after the boom, swings open in 3D (animate .door-l / .door-r rotateY) */
-export function Lawang({ className = '' }: { className?: string }) {
+export function Lawang({ className = '', open = false }: { className?: string; open?: boolean }) {
   return (
     <div className={`pointer-events-none absolute inset-0 flex ${className}`} style={{ perspective: 1600 }}>
       {(['l', 'r'] as const).map((side) => (
         <div
           key={side}
+          style={open ? { transform: `rotateY(${side === 'l' ? -110 : 110}deg)` } : undefined}
           className={`door-${side} relative h-full w-1/2 overflow-hidden border-[#1f0f07] bg-[#4a2414] [backface-visibility:hidden] ${side === 'l' ? 'origin-left border-r-2' : 'origin-right border-l-2'}`}
         >
           <Kawung className="absolute inset-0 opacity-20" color="#c98a3c" size={56} />
@@ -94,9 +95,131 @@ export function Lawang({ className = '' }: { className?: string }) {
             <GigiBalang color="#2b160c" accent="#c98a3c" size={28} />
           </div>
           {/* brass ring handle by the meeting edge */}
-          <span className={`absolute top-1/2 size-[3vh] -translate-y-1/2 rounded-full border-[3px] border-[#c98a3c] ${side === 'l' ? 'right-[7%]' : 'left-[7%]'}`} />
+          {/* low on the door, clear of whatever is written across the middle */}
+          <span className={`absolute top-[68%] size-[3vh] -translate-y-1/2 rounded-full border-[3px] border-[#c98a3c] ${side === 'l' ? 'right-[7%]' : 'left-[7%]'}`} />
         </div>
       ))}
     </div>
+  )
+}
+
+/* ---- the Nusantara pattern wall (grand opening countdown) */
+
+export type BatikKind = 'kawung' | 'parang' | 'truntum' | 'megamendung' | 'ceplok' | 'songket' | 'tumpal' | 'gigibalang'
+
+/** each pattern with where it comes from — the wall labels its tiles with these */
+export const BATIK: Array<{ kind: BatikKind; name: string; from: string }> = [
+  { kind: 'gigibalang', name: 'Gigi Balang', from: 'Betawi' },
+  { kind: 'kawung', name: 'Kawung', from: 'Yogyakarta' },
+  { kind: 'parang', name: 'Parang', from: 'Surakarta' },
+  { kind: 'megamendung', name: 'Mega Mendung', from: 'Cirebon' },
+  { kind: 'truntum', name: 'Truntum', from: 'Surakarta' },
+  { kind: 'songket', name: 'Songket', from: 'Palembang' },
+  { kind: 'ceplok', name: 'Ceplok', from: 'Jawa' },
+  { kind: 'tumpal', name: 'Tumpal', from: 'Nusantara' },
+]
+
+/** one tile-able pattern — fills its box. Plain SVG: drawn once, cheap on any phone */
+export function Batik({ kind, className = '', color = '#c98a3c', size = 48 }: { kind: BatikKind; className?: string; color?: string; size?: number }) {
+  const id = useId().replace(/:/g, '')
+  if (kind === 'kawung') return <Kawung className={className} color={color} size={size} />
+  const s = size
+  const w = s * 0.05
+  const line = { fill: 'none', stroke: color, strokeWidth: w, strokeLinecap: 'round' as const }
+  let body: ReactNode
+  switch (kind) {
+    case 'parang':
+      // diagonal bands of linked "S" blades with the small lozenge (mlinjon) between them
+      body = (
+        <>
+          <path d={`M${-s * 0.1} ${s * 0.6} C ${s * 0.15} ${s * 0.3}, ${s * 0.35} ${s * 0.55}, ${s * 0.6} ${-s * 0.1}`} {...line} strokeWidth={w * 2.4} />
+          <path d={`M${s * 0.4} ${s * 1.1} C ${s * 0.65} ${s * 0.8}, ${s * 0.85} ${s * 1.05}, ${s * 1.1} ${s * 0.4}`} {...line} strokeWidth={w * 2.4} />
+          <path d={`M${s * 0.72} ${s * 0.18} l${s * 0.1} ${s * 0.1} l${-s * 0.1} ${s * 0.1} l${-s * 0.1} ${-s * 0.1} Z`} fill={color} />
+          <path d={`M${s * 0.22} ${s * 0.68} l${s * 0.1} ${s * 0.1} l${-s * 0.1} ${s * 0.1} l${-s * 0.1} ${-s * 0.1} Z`} fill={color} />
+        </>
+      )
+      break
+    case 'truntum':
+      // little star-flowers scattered like a night sky (the "love that blooms again" batik)
+      body = (
+        <>
+          {[[s * 0.25, s * 0.25], [s * 0.75, s * 0.75]].map(([x, y], i) => (
+            <g key={i} transform={`translate(${x} ${y})`}>
+              {Array.from({ length: 8 }, (_, k) => (
+                <ellipse key={k} cx={0} cy={-s * 0.09} rx={s * 0.03} ry={s * 0.07} fill={color} transform={`rotate(${k * 45})`} />
+              ))}
+              <circle r={s * 0.035} fill="none" stroke={color} strokeWidth={w * 0.6} />
+            </g>
+          ))}
+          <circle cx={s * 0.75} cy={s * 0.25} r={s * 0.025} fill={color} />
+          <circle cx={s * 0.25} cy={s * 0.75} r={s * 0.025} fill={color} />
+        </>
+      )
+      break
+    case 'megamendung':
+      // Cirebon's rain clouds: nested rounded arcs stepping down
+      body = (
+        <>
+          {[0, 1, 2].map((k) => {
+            const r = s * (0.38 - k * 0.1)
+            return <path key={k} d={`M${s * 0.5 - r} ${s * 0.7} a${r / 2} ${r / 2} 0 0 1 ${r} 0 a${r / 2} ${r / 2} 0 0 1 ${r} 0`} {...line} />
+          })}
+          <path d={`M0 ${s * 0.2} a${s * 0.12} ${s * 0.12} 0 0 1 ${s * 0.24} 0`} {...line} />
+          <path d={`M${s * 0.76} ${s * 0.2} a${s * 0.12} ${s * 0.12} 0 0 1 ${s * 0.24} 0`} {...line} />
+        </>
+      )
+      break
+    case 'ceplok':
+      // a rosette in a square grid — four pointed petals, a ring, a dot
+      body = (
+        <>
+          <rect x={0} y={0} width={s} height={s} {...line} strokeWidth={w * 0.6} />
+          {[0, 90, 180, 270].map((r) => (
+            <path key={r} d={`M${s / 2} ${s / 2} Q ${s * 0.62} ${s * 0.3} ${s / 2} ${s * 0.12} Q ${s * 0.38} ${s * 0.3} ${s / 2} ${s / 2} Z`} fill={color} transform={`rotate(${r + 45} ${s / 2} ${s / 2})`} />
+          ))}
+          <circle cx={s / 2} cy={s / 2} r={s * 0.1} fill="none" stroke={color} strokeWidth={w} />
+        </>
+      )
+      break
+    case 'songket':
+      // gold-thread lozenge lattice with a small diamond inside each
+      body = (
+        <>
+          <path d={`M${s / 2} 0 L${s} ${s / 2} L${s / 2} ${s} L0 ${s / 2} Z`} {...line} />
+          <path d={`M${s / 2} ${s * 0.3} L${s * 0.7} ${s / 2} L${s / 2} ${s * 0.7} L${s * 0.3} ${s / 2} Z`} fill={color} />
+          <circle cx={0} cy={0} r={s * 0.06} fill={color} />
+          <circle cx={s} cy={s} r={s * 0.06} fill={color} />
+        </>
+      )
+      break
+    case 'tumpal':
+      body = (
+        <>
+          <path d={`M0 ${s} L${s / 2} 0 L${s} ${s} Z`} {...line} />
+          <path d={`M${s * 0.25} ${s} L${s / 2} ${s * 0.45} L${s * 0.75} ${s}`} {...line} />
+          <circle cx={s / 2} cy={s * 0.78} r={s * 0.05} fill={color} />
+        </>
+      )
+      break
+    case 'gigibalang':
+      body = (
+        <>
+          <rect width={s} height={s * 0.14} fill={color} />
+          <path d={`M0 ${s * 0.14} H${s} L${s / 2} ${s * 0.6} Z`} fill={color} />
+          <path d={`M${s / 2} ${s * 0.22} l${s * 0.08} ${s * 0.1} l${-s * 0.08} ${s * 0.1} l${-s * 0.08} ${-s * 0.1} Z`} fill="#1f0f07" />
+          <path d={`M0 ${s * 0.6} H${s} L${s / 2} ${s} Z`} {...line} strokeWidth={w * 0.6} />
+        </>
+      )
+      break
+  }
+  return (
+    <svg className={className} width="100%" height="100%" aria-hidden>
+      <defs>
+        <pattern id={`bt-${id}`} width={s} height={s} patternUnits="userSpaceOnUse">
+          {body}
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill={`url(#bt-${id})`} />
+    </svg>
   )
 }

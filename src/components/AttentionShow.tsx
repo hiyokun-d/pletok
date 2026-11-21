@@ -33,7 +33,7 @@ export function AttentionShow({ show, onDone }: { show: number; onDone: () => vo
 
 interface Kit {
   alive: () => boolean
-  shake: (k?: number) => void
+  push: (k?: number) => void
   confetti: () => void
 }
 
@@ -46,7 +46,8 @@ function useScript(scope: RefObject<HTMLDivElement | null>, animate: Animate, on
     let alive = true
     const kit: Kit = {
       alive: () => alive,
-      shake: (k = 1) => void animate(scope.current!, { x: [0, -14 * k, 12 * k, -8 * k, 5 * k, 0], y: [0, 8 * k, -6 * k, 4 * k, 0] }, { duration: 0.4 }),
+      // a smooth push-in on each hit — no shaking
+      push: (k = 1) => void animate(scope.current!, { scale: [1, 1 + 0.03 * k, 1] }, { duration: 0.55, ease: [0.22, 1, 0.36, 1] }),
       confetti: () => setConfettiKey(Date.now()),
     }
     void script(kit).then(async () => {
@@ -108,13 +109,13 @@ function PsstShow({ onDone }: { onDone: () => void }) {
   const [scope, animate] = useAnimate<HTMLDivElement>()
   const [beat, setBeat] = useState(-1)
   const [burst, setBurst] = useState<number>()
-  const confettiKey = useScript(scope, animate, onDone, async ({ alive, shake, confetti }) => {
+  const confettiKey = useScript(scope, animate, onDone, async ({ alive, push, confetti }) => {
     await animate('.flash', { opacity: [0, 1, 0] }, { duration: 0.35 })
     animate('.rays', { opacity: [0, 1], scale: [0.3, 1] }, { duration: 0.6, ease: ease.out })
     for (let i = 0; i < BEATS.length && alive(); i++) {
       setBeat(i)
       await wait(90)
-      shake(i === 2 ? 1.4 : 0.9)
+      push(i === 2 ? 1.4 : 0.9)
       setBurst(Date.now())
       await wait(720)
     }
@@ -126,13 +127,13 @@ function PsstShow({ onDone }: { onDone: () => void }) {
       await wait(170)
     }
     await wait(500)
-    shake(0.8)
+    push(0.8)
     animate('.atn-cupwrap', { y: [0, -36, 0] }, { duration: 0.45, delay: (i: number) => i * 0.07, ease: 'easeOut' })
     await animate('.atn-halal', { scale: [3, 0.9, 1], opacity: [0, 1, 1], rotate: [-25, -8, -8] }, { duration: 0.45, ease: 'easeOut' })
-    shake(0.6)
+    push(0.6)
     await wait(500)
     await animate('.atn-cta', pop, { duration: 0.55, ease: 'easeOut' })
-    shake(1.2)
+    push(1.2)
     confetti()
     animate('.atn-cta', { scale: [1, 1.06, 1] }, { duration: 0.5, repeat: 3, ease: 'easeInOut' })
     await wait(2300)
@@ -204,11 +205,11 @@ function PsstShow({ onDone }: { onDone: () => void }) {
 function LawangShow({ onDone }: { onDone: () => void }) {
   const live = useMenu()
   const [scope, animate] = useAnimate<HTMLDivElement>()
-  const confettiKey = useScript(scope, animate, onDone, async ({ alive, shake, confetti }) => {
+  const confettiKey = useScript(scope, animate, onDone, async ({ alive, push, confetti }) => {
     await wait(300)
     for (const k of ['.lw-k0', '.lw-k1']) {
       animate(k, { opacity: [0, 1], scale: [2, 1], rotate: [k === '.lw-k0' ? -14 : 12, k === '.lw-k0' ? -6 : 5] }, { type: 'spring', stiffness: 500, damping: 18 })
-      animate('.lw-doors', { x: [0, -10, 8, -4, 0] }, { duration: 0.3 })
+      animate('.lw-doors', { scale: [1, 1.015, 1] }, { duration: 0.3, ease: 'easeOut' })
       await wait(520)
     }
     await wait(400)
@@ -225,7 +226,7 @@ function LawangShow({ onDone }: { onDone: () => void }) {
     await animate('.lw-title', { opacity: [0, 1], y: [30, 0] }, { duration: 0.5, ease: ease.out })
     animate('.lw-band', { y: ['-100%', '0%'] }, { duration: 0.6, ease: ease.out })
     await animate('.lw-cta', pop, { duration: 0.55, ease: 'easeOut' })
-    shake(1)
+    push(1)
     confetti()
     await wait(2800)
   })
@@ -273,20 +274,20 @@ const BANDS = [
 function MarqueeShow({ onDone }: { onDone: () => void }) {
   const live = useMenu()
   const [scope, animate] = useAnimate<HTMLDivElement>()
-  const confettiKey = useScript(scope, animate, onDone, async ({ alive, shake, confetti }) => {
+  const confettiKey = useScript(scope, animate, onDone, async ({ alive, push, confetti }) => {
     BANDS.forEach((_, i) => {
       animate(`.mq-band-${i}`, { x: [i % 2 ? '-110%' : '110%', '0%'] }, { duration: 0.6, ease: ease.out, delay: i * 0.08 })
       animate(`.mq-row-${i}`, { x: i % 2 ? ['-50%', '0%'] : ['0%', '-50%'] }, { duration: 9, ease: 'linear' })
     })
     await wait(900)
-    shake(0.7)
+    push(0.7)
     await wait(2200)
     if (!alive()) return
     BANDS.forEach((_, i) => animate(`.mq-band-${i}`, { x: i % 2 ? '120%' : '-120%' }, { duration: 0.55, ease: [0.7, 0, 0.84, 0], delay: i * 0.05 }))
     await wait(450)
     live.drinks.forEach((_, i) => animate(`.mq-cup-${i}`, { y: ['60vh', '0vh'], rotate: [(i - 1) * 20, 0], opacity: [0, 1] }, { type: 'spring', stiffness: 220, damping: 16, delay: i * 0.1 }))
     await animate('.mq-cta', { rotateX: [-90, 10, 0], opacity: [0, 1, 1] }, { duration: 0.6, ease: 'easeOut', delay: 0.25 })
-    shake(1.1)
+    push(1.1)
     confetti()
     await wait(2600)
   })
@@ -323,24 +324,24 @@ function MarqueeShow({ onDone }: { onDone: () => void }) {
 function CardsShow({ onDone }: { onDone: () => void }) {
   const live = useMenu()
   const [scope, animate] = useAnimate<HTMLDivElement>()
-  const confettiKey = useScript(scope, animate, onDone, async ({ alive, shake, confetti }) => {
+  const confettiKey = useScript(scope, animate, onDone, async ({ alive, push, confetti }) => {
     await animate('.kt-title', { opacity: [0, 1], y: [-30, 0] }, { duration: 0.45, ease: ease.out })
     for (let i = 0; i < live.drinks.length; i++) {
       animate(`.kt-card-${i}`, { y: ['-110vh', '0vh'], rotateZ: [(i - 1) * 25 - 10, (i - 1) * 4] }, { type: 'spring', stiffness: 170, damping: 17 })
       await wait(160)
     }
     await wait(700)
-    shake(0.5)
+    push(0.5)
     for (let i = 0; i < live.drinks.length && alive(); i++) {
       animate(`.kt-card-${i}`, { rotateY: [0, 180], scale: [1, 1.12, 1] }, { duration: 0.75, ease: [0.65, 0, 0.35, 1] })
       await wait(600)
-      shake(0.35)
+      push(0.35)
     }
     if (!alive()) return
     await wait(300)
     animate('.kt-title', { opacity: 0 }, { duration: 0.2 })
     await animate('.kt-cta', pop, { duration: 0.55, ease: 'easeOut' })
-    shake(1)
+    push(1)
     confetti()
     await wait(2600)
   })
@@ -384,7 +385,7 @@ function SpotShow({ onDone }: { onDone: () => void }) {
   const live = useMenu()
   const [scope, animate] = useAnimate<HTMLDivElement>()
   const [say, setSay] = useState(-1)
-  const confettiKey = useScript(scope, animate, onDone, async ({ alive, shake, confetti }) => {
+  const confettiKey = useScript(scope, animate, onDone, async ({ alive, push, confetti }) => {
     const W = window.innerWidth
     const H = window.innerHeight
     const at = (sel: string) => {
@@ -405,7 +406,7 @@ function SpotShow({ onDone }: { onDone: () => void }) {
     await animate('.st-spot', { scale: 14 }, { duration: 0.55, ease: [0.7, 0, 0.84, 0] })
     animate('.st-spot', { opacity: 0 }, { duration: 0.2 })
     await animate('.st-all', { scale: [3, 1], opacity: [0, 1], rotate: [-12, -4] }, { duration: 0.4, ease: [0.2, 0, 0, 1] })
-    shake(1.3)
+    push(1.3)
     animate('.st-cupwrap', { y: [0, -40, 0] }, { duration: 0.45, delay: (i: number) => i * 0.07, ease: 'easeOut' })
     await animate('.st-cta', pop, { duration: 0.55, ease: 'easeOut' })
     confetti()

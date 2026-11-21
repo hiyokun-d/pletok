@@ -54,11 +54,11 @@ export default function App() {
     setEgg(true)
   }, [])
 
-  // last 10 seconds before 13:00 → the ceremony takes over the screen
+  // last 30 seconds before 13:00 (batik wall at 20 s, the gate shuts at 12 s) → the ceremony takes over the screen
   useEffect(() => {
-    // crew moved the clock back before the last 10s → the ceremony can fire again
-    if (phase === 'pre-open' && remaining > 10_000) autoPlayed.current = false
-    if (!autoPlayed.current && phase === 'pre-open' && remaining > 0 && remaining <= 10_000) {
+    // crew moved the clock back before the last 30s → the ceremony can fire again
+    if (phase === 'pre-open' && remaining > 30_000) autoPlayed.current = false
+    if (!autoPlayed.current && phase === 'pre-open' && remaining > 0 && remaining <= 30_000) {
       autoPlayed.current = true
       setGrand('auto')
     }

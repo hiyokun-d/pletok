@@ -228,9 +228,10 @@ export function ReceiptPage({ id }: { id: string }) {
                 type="button"
                 onClick={() => void arm()}
                 disabled={armed}
-                className="mt-3 flex w-full items-center justify-center gap-2 rounded-full bg-terracotta py-3.5 font-display font-semibold text-cream shadow-[0_5px_0_#6e3418] disabled:bg-leaf disabled:shadow-none"
+                // the "armed" text is two lines on a phone: padding + a shrink-proof icon keep it inside the pill
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-full bg-terracotta px-5 py-3.5 text-center font-display font-semibold leading-snug text-cream shadow-[0_5px_0_#6e3418] disabled:rounded-3xl disabled:bg-leaf disabled:shadow-none"
               >
-                <BellRing className="size-5" /> {armed ? 'Oke! HP bunyi saat siap — biarkan halaman ini terbuka' : 'Kabari saya saat siap'}
+                <BellRing className="size-5 shrink-0" /> <span>{armed ? 'Oke! HP bunyi saat siap — biarkan halaman ini terbuka' : 'Kabari saya saat siap'}</span>
               </button>
             )}
 

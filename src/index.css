@@ -4,6 +4,8 @@
 @import "@fontsource/fredoka/700.css";
 @import "@fontsource/caveat/600.css";
 @import "@fontsource/caveat/700.css";
+/* aksara Jawa — only the Javanese range, so it downloads only when the grand opening countdown uses it */
+@import "@fontsource/noto-sans-javanese/javanese-700.css";
 @import "@fontsource/barlow-condensed/500-italic.css";
 @import "@fontsource/barlow-condensed/600-italic.css";
 @import "tailwindcss";
@@ -23,6 +25,7 @@
   --font-display: "Fredoka", ui-rounded, system-ui, sans-serif;
   --font-script: "Caveat", cursive;
   --font-cond: "Barlow Condensed", system-ui, sans-serif;
+  --font-aksara: "Noto Sans Javanese", var(--font-display);
 }
 
 :root {
@@ -179,7 +182,7 @@ body {
   background: var(--color-brown);
 }
 
-/* A + T shakes #root; a transformed parent becomes the box for its fixed children, so it must span the viewport */
+/* A + T pulses #root; a transformed parent becomes the box for its fixed children, so it must span the viewport */
 #root {
   min-height: 100dvh;
 }

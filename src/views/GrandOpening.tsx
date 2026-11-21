@@ -11,13 +11,14 @@ import { Flame, Leaf, ShieldCheck } from 'lucide-react'
 import { useMenu } from '../hooks/useMenu'
 import { useLite } from '../lib/perf'
 import { GigiBalang, Kawung, Lawang, Tumpal } from '../components/BetawiPattern'
+import { BatikCloth } from '../components/BatikCloth'
 
 type Scene = 'count' | 'title' | 'logo' | 'halal' | 'tour' | 'finale'
 const STOPS = DRINKS.length + 1 // three drinks + the bundles
 type Pt = [number, number]
 
 interface GrandOpeningProps {
-  /** `auto`: follows the real clock's last 10s. `manual`: crew pressed the button — own 5s count. */
+  /** `auto`: follows the real clock's last 30s (batik wall at 20 s, the gate shuts at 12 s). `manual`: crew pressed the button — own 5s count. */
   mode: 'auto' | 'manual'
   onDone: () => void
 }
@@ -54,6 +55,9 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
   const [confettiKey, setConfettiKey] = useState<number>()
   const [showDoors, setShowDoors] = useState(false)
   const lite = useLite()
+  // the real 13:00 opening gets the long count: the batik wall builds, then the gate shuts
+  const full = mode === 'auto'
+  const gateShut = useRef(false)
   const started = useRef(false)
   const done = useRef(false)
   const logoReady = useRef<() => void>(undefined)
@@ -88,6 +92,27 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // 12 s to go: the carved gate swings shut, the count carries on over it
+  useEffect(() => {
+    // crew moved the clock back (A+B) past 12 s again → the gate opens back up, ready to shut again
+    if (full && scene === 'count' && left > 12 && gateShut.current) {
+      gateShut.current = false
+      setShowDoors(false)
+      return
+    }
+    if (!full || scene !== 'count' || left > 12 || left <= 0 || gateShut.current) return
+    gateShut.current = true
+    setShowDoors(true)
+  }, [full, scene, left])
+  useEffect(() => {
+    if (!showDoors || !gateShut.current || scene !== 'count') return
+    const close = { duration: 1.4, ease: [0.65, 0, 0.35, 1] as [number, number, number, number] }
+    animate('.doors', { opacity: [0, 1] }, { duration: 0.3 })
+    animate('.door-l', { rotateY: [-110, 0] }, close)
+    animate('.door-r', { rotateY: [110, 0] }, close).then(() => push(0.6))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showDoors])
+
   useEffect(() => {
     if (started.current || scene !== 'count') return
     if (left <= 0 || (mode === 'auto' && phase !== 'pre-open')) {
@@ -109,7 +134,8 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
     )
   }
 
-  const shake = (k = 1) => animate(scope.current, { x: [0, -14 * k, 11 * k, -7 * k, 4 * k, 0], y: [0, 9 * k, -6 * k, 4 * k, -2 * k, 0] }, { duration: 0.45 })
+  // impacts land as a smooth push-in (the camera leans toward the moment and settles) — no shaking
+  const push = (k = 1) => animate(scope.current, { scale: [1, 1 + 0.03 * k, 1] }, { duration: 0.55, ease: [0.22, 1, 0.36, 1] })
 
   /** The whole show, one camera move after another */
   const show = async () => {
@@ -117,7 +143,7 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
     setBoomKey(Date.now())
     animate('.flash', { opacity: [0, 1, 0] }, { duration: 0.9, times: [0, 0.08, 1] })
     animate('.shock', { scale: [0, 4], opacity: [0.9, 0] }, { duration: 1.4, delay: (i: number) => i * 0.12, ease: ease.out })
-    shake(1.4)
+    push(1.4)
     setShowDoors(true)
     await wait(260)
     setScene('title')
@@ -138,7 +164,7 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
       { y: ['110%', '-12%', '0%'], rotateX: [-90, 10, 0], opacity: [0, 1, 1] },
       { duration: 0.55, delay: (i: number) => i * 0.045, ease: 'easeOut' },
     )
-    shake(0.5)
+    push(0.5)
     animate('.t-line', { scaleX: [0, 1] }, { duration: 0.6, ease: ease.inOut })
     await animate('.t-shine', { backgroundPosition: ['100% 0', '0% 0'] }, { duration: 0.9, ease: ease.inOut })
     // anticipation: the word sucks in a little… then we punch through it
@@ -153,7 +179,7 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
     await wait(250)
     for (let i = 0; i < TAGLINE_WORDS.length; i++) {
       await animate(`.w-${i}`, { opacity: [0, 1], scale: [2.6, 1], y: ['-30%', '0%'] }, { duration: 0.3, ease: [0.2, 0, 0, 1] })
-      shake(0.45)
+      push(0.45)
       await wait(170)
     }
     await wait(900)
@@ -165,11 +191,11 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
     await animate('.l-cam', { scale: [0.95, 9], opacity: [1, 1, 0] }, { duration: 0.6, ease: [0.7, 0, 0.84, 0] })
     setShowLogo(false)
     await animate('.h-bir', { opacity: [0, 1], scale: [3.2, 1] }, { duration: 0.45, ease: [0.2, 0, 0, 1] })
-    shake(0.7)
+    push(0.7)
     await animate('.h-q', { opacity: [0, 1], y: [16, 0] }, { duration: 0.45, ease: ease.out })
     await wait(700)
     await animate('.h-stamp', { scale: [3.4, 0.9, 1.05, 1], rotate: [-24, -8, -11, -10], opacity: [0, 1, 1, 1] }, { duration: 0.5, ease: 'easeOut' })
-    shake(1.2)
+    push(1.2)
     setHalalKey(Date.now())
     animate('.h-bir', { opacity: 0.35 }, { duration: 0.4 })
     await animate('.h-badge', { opacity: [0, 1], y: [30, 0], scale: [0.6, 1] }, { type: 'spring', stiffness: 380, damping: 18, delay: (i: number) => 0.15 + i * 0.14 })
@@ -206,7 +232,7 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
         // cup drops onto the coaster — dust and a thump on landing
         await wait(430)
         setLandKey(Date.now())
-        shake(0.55)
+        push(0.55)
         await wait(2300)
       } else await wait(3600)
     }
@@ -229,7 +255,7 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
       { scale: [3.4, 0.92, 1.04, 1], rotate: [-24, -5, -7, -6], rotateX: [70, -8, 3, 0], opacity: [0, 1, 1, 1] },
       { duration: 0.6, ease: 'easeOut' },
     )
-    shake(1.3)
+    push(1.3)
     animate('.f-orn', { opacity: [0, 0.4], scale: [0.5, 1] }, { duration: 1.2, ease: ease.out })
     animate('.f-band', { y: ['-100%', '0%'] }, { duration: 0.7, ease: ease.out })
     setConfettiKey(Date.now())
@@ -247,11 +273,12 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
   const tourParticle = station >= DRINKS.length ? 'sparkle' : DRINKS[Math.max(station, 0)].particle
 
   return (
+    <>
     <motion.div
       className="fixed inset-0 z-[60] overflow-hidden bg-[#2b160c]"
-      // quick: the page underneath was still showing through the countdown on a phone
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1, transition: { duration: 0.25 } }}
+      // the ceremony floods in from the bottom behind a wave of pletok (lite phones: a quick fade)
+      initial={lite ? { opacity: 0 } : { clipPath: 'inset(100% 0% 0% 0%)' }}
+      animate={lite ? { opacity: 1, transition: { duration: 0.25 } } : { clipPath: 'inset(0% 0% 0% 0%)', transition: RISE }}
       onClick={tap}
       // no exit animation: the finale cuts straight to the open booth
       exit={{ opacity: 1, transition: { duration: 0 } }}
@@ -269,10 +296,13 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
 
         <ParticleField preset="spice" overrides={{ count: 60, colors: ['#c98a3c', '#f1d3a8', '#a8572a'], opacity: counting ? 0.9 : 0 }} speed={1 + urgency * 4} />
 
+        {/* kain batik from across Indonesia hang and fall like real cloth from 20 s (prepared from 30 s) */}
+        <AnimatePresence>{full && counting && <BatikCloth lite={lite} show={left <= 20} />}</AnimatePresence>
+
         {/* ================= countdown ================= */}
         <AnimatePresence>
           {counting && (
-            <motion.div className="absolute inset-0 flex flex-col items-center justify-center text-cream" exit={{ opacity: 0, scale: 1.5, transition: { duration: 0.35 } }}>
+            <motion.div className="absolute inset-0 z-[15] flex flex-col items-center justify-center text-cream" exit={{ opacity: 0, scale: 1.5, transition: { duration: 0.35 } }}>
               <motion.div
                 className="pointer-events-none absolute inset-0"
                 animate={{ opacity: 0.6 + urgency * 0.4 }}
@@ -299,17 +329,8 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
                     transition={{ duration: 1, delay: i * 0.18, ease: ease.out }}
                   />
                 ))}
-                <AnimatePresence mode="popLayout">
-                  <motion.span
-                    key={left}
-                    className="font-display text-[min(40vh,38vw)] font-bold leading-none tabular-nums [text-shadow:0_14px_0_rgb(0_0_0/0.25)]"
-                    initial={{ scale: 1.8, opacity: 0, rotateX: -85 }}
-                    animate={{ scale: 1, opacity: 1, rotateX: 0 }}
-                    exit={{ scale: 0.7, opacity: 0, rotateX: 85, y: -40 }}
-                    transition={{ type: 'spring', stiffness: 420, damping: 22 }}
-                  >
-                    {Math.max(left, 0)}
-                  </motion.span>
+                <AnimatePresence mode="wait">
+                  <HandDigit key={left} n={Math.max(left, 0)} aksara={full} />
                 </AnimatePresence>
               </div>
               <p className="font-script text-[clamp(1.6rem,4.4vh,3rem)] font-bold text-yakult">Rempahnya siap diseduh…</p>
@@ -487,7 +508,7 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
         )}
         {!dark && (
           <motion.div className="pointer-events-none absolute inset-x-0 bottom-0 opacity-25" initial={{ y: '100%' }} animate={{ y: '0%' }} transition={{ duration: 0.7, ease: ease.out }}>
-            <Tumpal color="#5e7b3a" accent="#f5ebdd" size={portrait ? 18 : 26} />
+            <Tumpal color="#5e7b3a" accent="#f5ebdd" size={portrait ? 14 : 18} />
           </motion.div>
         )}
 
@@ -501,7 +522,7 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
           </div>
         )}
 
-        {showDoors && <Lawang className="doors z-10" />}
+        {showDoors && <Lawang className="doors z-10" open={gateShut.current && scene === 'count'} />}
 
         {/* the leaf that wipes each cut */}
         <svg viewBox="0 0 59 49" className="leaf-wipe pointer-events-none absolute left-1/2 top-1/2 z-20 h-[150vh] w-[180vh] -translate-x-1/2 -translate-y-1/2 opacity-0" aria-hidden>
@@ -522,6 +543,31 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
       {!counting && (
         <span className={`absolute bottom-3 right-4 z-10 font-cond text-xs font-semibold uppercase italic tracking-widest transition-colors duration-500 ${dark ? 'text-cream/35' : 'text-brown/35'}`}>{portrait ? 'ketuk 2× · lewati' : 'esc · lewati'}</span>
       )}
+    </motion.div>
+    {!lite && <Tide />}
+    </>
+  )
+}
+
+const RISE = { duration: 1.1, ease: [0.65, 0, 0.35, 1] as [number, number, number, number] }
+
+/** the crest riding on top of the rising ceremony — two waves of pletok sloshing as they climb */
+function Tide() {
+  const wave = 'M0 60 C 150 20, 300 100, 450 60 S 750 20, 900 60 S 1200 100, 1350 60 S 1650 20, 1800 60 V 120 H 0 Z'
+  return (
+    <motion.div
+      className="pointer-events-none fixed inset-x-0 top-0 z-[61] h-[12vh] overflow-hidden"
+      // its bottom edge rides exactly on the rising clip edge (12vh tall: 88vh → -12vh)
+      initial={{ y: '88vh' }}
+      animate={{ y: ['88vh', '-12vh'], opacity: [1, 1, 0] }}
+      transition={{ y: RISE, opacity: { duration: RISE.duration + 0.1, times: [0, 0.9, 1] } }}
+    >
+      <motion.svg viewBox="0 0 1800 120" preserveAspectRatio="none" className="absolute bottom-0 h-full w-[200%]" animate={{ x: ['0%', '-25%'] }} transition={{ duration: 1.2, ease: 'linear' }}>
+        <path d={wave} fill="#a8572a" />
+      </motion.svg>
+      <motion.svg viewBox="0 0 1800 120" preserveAspectRatio="none" className="absolute -bottom-[2vh] h-[80%] w-[200%]" animate={{ x: ['-25%', '0%'] }} transition={{ duration: 1.2, ease: 'linear' }}>
+        <path d={wave} fill="#5a2e1a" />
+      </motion.svg>
     </motion.div>
   )
 }
@@ -781,3 +827,60 @@ function LeafBackdrop() {
   )
 }
 
+/** a countdown number written by hand: the pen draws it, ink fills in — then it's wiped off for the next.
+ *  The real 13:00 count writes it in aksara Jawa, with the everyday number beside it so everyone can read it. */
+function HandDigit({ n, aksara: jawa = false }: { n: number; aksara?: boolean }) {
+  const wide = n >= 10
+  if (!jawa) return <Ink text={String(n)} viewBox={wide ? '0 0 300 220' : '0 0 200 220'} x={wide ? 150 : 100} y={175} size={wide ? 190 : 210} font="font-script" flourish={wide ? 'M60 205 C 120 192, 190 214, 250 198' : 'M45 205 C 85 194, 125 214, 160 199'} label={String(n)} />
+  return (
+    <div className="flex items-center gap-[2vw]" aria-label={String(n)}>
+      {/* aksara digits like ꧒ hang well below the line — they sit higher, with room under */}
+      <Ink text={aksara(n)} viewBox={wide ? '0 0 260 220' : '0 0 150 220'} x={wide ? 130 : 75} y={118} size={wide ? 112 : 128} font="font-aksara" dur={0.5} className="h-[min(36vh,34vw)]" />
+      <motion.span className="h-[min(18vh,22vw)] w-[3px] rounded-full bg-yakult/40" initial={{ scaleY: 0 }} animate={{ scaleY: 1, transition: { delay: 0.25 } }} exit={{ opacity: 0, transition: { duration: 0.1 } }} />
+      <Ink text={String(n)} viewBox={wide ? '0 0 230 220' : '0 0 130 220'} x={wide ? 115 : 65} y={150} size={wide ? 160 : 180} font="font-script" dur={0.35} className="h-[min(36vh,34vw)]" />
+    </div>
+  )
+}
+
+/** one line of hand-drawn ink: outline drawn by the pen, then filled */
+function Ink({ text, viewBox, x, y, size, font, flourish, delay = 0, dur = 0.75, label, className = 'h-[min(40vh,60vw)]' }: { text: string; viewBox: string; x: number; y: number; size: number; font: string; flourish?: string; delay?: number; dur?: number; label?: string; className?: string }) {
+  return (
+    <motion.svg viewBox={viewBox} className={`${className} w-auto overflow-visible`} aria-label={label}>
+      <motion.text
+        x={x}
+        y={y}
+        textAnchor="middle"
+        className={font}
+        fontSize={size}
+        fontWeight={700}
+        stroke="#f1d3a8"
+        strokeWidth={3}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="#f5ebdd"
+        strokeDasharray={1400}
+        initial={{ strokeDashoffset: 1400, fillOpacity: 0 }}
+        animate={{ strokeDashoffset: 0, fillOpacity: [0, 0, 1], transition: { strokeDashoffset: { duration: dur, ease: 'easeInOut', delay }, fillOpacity: { duration: dur, times: [0, 0.55, 1], delay } } }}
+        exit={{ strokeDashoffset: 1400, fillOpacity: 0, transition: { duration: 0.15, ease: 'easeIn' } }}
+      >
+        {text}
+      </motion.text>
+      {/* the pen's flourish under it */}
+      {flourish && (
+        <motion.path
+          d={flourish}
+          fill="none"
+          stroke="#c98a3c"
+          strokeWidth={4}
+          strokeLinecap="round"
+          initial={{ pathLength: 0, opacity: 1 }}
+          animate={{ pathLength: 1, transition: { duration: 0.3, delay: 0.5 } }}
+          exit={{ opacity: 0, transition: { duration: 0.15 } }}
+        />
+      )}
+    </motion.svg>
+  )
+}
+
+/** a number the way it's written in aksara Jawa: ꧐ ꧑ ꧒ … ꧙ */
+const aksara = (n: number) => String(n).replace(/\d/g, (d) => String.fromCharCode(0xa9d0 + Number(d)))

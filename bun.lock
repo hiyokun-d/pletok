@@ -8,6 +8,7 @@
         "@fontsource/barlow-condensed": "^5.3.0",
         "@fontsource/caveat": "^5.3.0",
         "@fontsource/fredoka": "^5.3.0",
+        "@fontsource/noto-sans-javanese": "5",
         "@vercel/analytics": "^2.0.1",
         "@vercel/speed-insights": "^2.1.0",
         "jsqr": "1.4.0",
@@ -42,6 +43,8 @@
     "@fontsource/caveat": ["@fontsource/caveat@5.3.0", "", {}, "sha512-eHTfzQxFSW9ABERRLNruHoNJmKed2J7pqTUc5lp4a4POMgXGKpxmWj3d9Hz10kmAg6iuTTLe6UagbA4bnsmfQw=="],
 
     "@fontsource/fredoka": ["@fontsource/fredoka@5.3.0", "", {}, "sha512-s2IhjQ50wDnKkkaKmjhtL0rxQg6ITsVusiipM3m7zUwVZZbbCKsscNDkngwp28xVzfIt7neWrkgU1qKqyTycQg=="],
+
+    "@fontsource/noto-sans-javanese": ["@fontsource/noto-sans-javanese@5.3.0", "", {}, "sha512-8BFyi66ZFOZCt6Kxf0VL/zKRARRmKU8zgIuY7rHXFq8mPj85+zP/KbBE5/RZ4HKBq8KcZv8WArYg/hzzrZ55JA=="],
 
     "@jridgewell/gen-mapping": ["@jridgewell/gen-mapping@0.3.13", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.0", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA=="],
 
