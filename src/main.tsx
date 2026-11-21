@@ -7,7 +7,7 @@ import { TRAP_PATH, TrapPage } from './views/TrapPage'
 import { SystemStatus } from './components/SystemStatus'
 import { CrewRouter } from './components/CrewRouter'
 import { ThemeHost } from './components/SunsetTheme'
-import { UpdatePill, watchUpdates } from './components/UpdatePill'
+import { watchUpdates } from './lib/updates'
 import { ErrorBoundary, ErrorPage, type ErrorKind } from './views/ErrorPage'
 import { beforeSend, installClickTracking, trackSource } from './lib/analytics'
 import './index.css'
@@ -91,10 +91,8 @@ createRoot(document.getElementById('root')!).render(
     <ErrorBoundary>{CREW.includes(path) ? <CrewRouter first={page} pages={CREW_PAGES} /> : page}</ErrorBoundary>
     {/* the look picked on /config (menu, /cashier, /link) */}
     {!hop && <ThemeHost />}
-    {/* offline / Sheet down / back again — the booth app has its own island for this */}
+    {/* offline / Sheet down / back again / new version ready — the booth app has its own island for this */}
     {!hop && path !== '' && <SystemStatus />}
-    {/* a new deploy while this page is open → "muat ulang" (not on the menu: it has its dock there) */}
-    {!hop && path !== '' && <UpdatePill />}
     {/* free Vercel Web Analytics + Speed Insights (only report on the deployed site, not localhost) */}
     <Analytics beforeSend={beforeSend} />
     {!hop && <SpeedInsights />}

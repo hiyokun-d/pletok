@@ -6,6 +6,7 @@ import { BUNDLES, DRINKS, type DrinkId } from '../data/menu'
 import { DEFAULT_CUTOFF, DEFAULT_PREORDER, PREORDER_ITEMS } from '../data/preorder'
 import { BACKEND, crewPin, savePreorderConfig, setFeedbackModeRemote, wipeData, type PreorderConfig, type Promo, type WipeTarget } from '../lib/backend'
 import { usePreorder } from '../hooks/usePreorder'
+import { SHOWS } from '../components/AttentionShow'
 import { resetMenu, scheduleAttention, setTheme, type ThemeId, setBundleForced, setBundleItems, setClosedEarly, setDrinkSold, setMenuPrice, useMenu, useMenuSync } from '../hooks/useMenu'
 import { useEventPhase } from '../hooks/useEventPhase'
 import { useFeedbackOpen, type FeedbackMode } from '../hooks/useFeedbackOpen'
@@ -529,7 +530,7 @@ function PreorderAdmin({ remote, loaded, save, promoUsed }: { remote: PreorderCo
 
 /* ------------------------------------------------------------------ A+G from a phone */
 
-const ATTN_DELAYS = [15, 30, 60]
+const ATTN_DELAYS = [3, 15, 30, 60]
 
 /** the booth screen's attention show, started from here — a delay so the screen has the order in time */
 /* ------------------------------------------------------------------ theme */
@@ -604,7 +605,8 @@ function ThemePicker() {
 function AttentionRemote() {
   const { attnAt } = useMenu()
   const sync = useMenuSync()
-  const [delay, setDelay] = useState(15)
+  const [delay, setDelay] = useState(3)
+  const [pick, setPick] = useState(-1) // -1 = acak
   const [now, setNow] = useState(Date.now)
   const waiting = !!attnAt && attnAt > now
   // tick through the countdown and the 10 s "now playing" note after it
@@ -618,7 +620,7 @@ function AttentionRemote() {
   const justPlayed = !!attnAt && !waiting && now - attnAt < 10_000
   return (
     <Card title={<span className="flex items-center gap-2"><Megaphone className="size-5 text-terracotta" /> Attention show (A+G)</span>} meta="diputar di layar booth">
-      <p className="font-display text-sm text-brown-soft">Show 7 detik yang rame buat narik orang ke meja — sama seperti A+G di laptop booth. Ada jeda dulu supaya layar booth sempat menerima perintahnya (layar cek tiap ±10 detik).</p>
+      <p className="font-display text-sm text-brown-soft">Show ±8 detik yang rame buat narik orang ke meja — sama seperti A+G di laptop booth. Layar booth cek perintah tiap ±10 detik: jeda 3 dtk = main begitu layar menerimanya.</p>
       {waiting ? (
         <div className="mt-3 flex items-center gap-3 rounded-2xl p-4" style={{ background: sync.pending ? `${WAIT}33` : 'rgb(94 123 58 / 0.12)' }}>
           {sync.pending ? <Loader2 className="size-5 animate-spin text-brown" /> : <Megaphone className="size-5 text-leaf" />}
@@ -630,6 +632,18 @@ function AttentionRemote() {
           </button>
         </div>
       ) : (
+        <>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {[{ name: 'Acak', hint: 'Pilih satu dari 5' }, ...SHOWS].map((sh, k) => {
+            const i = k - 1
+            return (
+              <button key={sh.name} type="button" onClick={() => setPick(i)} aria-pressed={pick === i} className={`rounded-2xl px-3 py-2 text-left ${pick === i ? 'bg-brown text-cream' : 'border-2 border-brown/15'}`}>
+                <span className="block font-display text-sm font-semibold">{sh.name}</span>
+                <span className={`block font-cond text-xs italic ${pick === i ? 'text-cream/70' : 'text-brown/60'}`}>{sh.hint}</span>
+              </button>
+            )
+          })}
+        </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <span className="font-cond italic text-brown-soft">Jeda</span>
           {ATTN_DELAYS.map((d) => (
@@ -637,10 +651,11 @@ function AttentionRemote() {
               {d} dtk
             </button>
           ))}
-          <motion.button type="button" whileTap={{ scale: 0.96 }} onClick={() => (scheduleAttention(delay * 1000), setNow(Date.now()))} className="ml-auto flex items-center gap-2 rounded-full bg-terracotta px-5 py-2.5 font-display font-semibold text-cream shadow-[0_4px_0_#6e3418]">
+          <motion.button type="button" whileTap={{ scale: 0.96 }} onClick={() => (scheduleAttention(delay * 1000, pick), setNow(Date.now()))} className="ml-auto flex items-center gap-2 rounded-full bg-terracotta px-5 py-2.5 font-display font-semibold text-cream shadow-[0_4px_0_#6e3418]">
             <Megaphone className="size-4" /> Putar
           </motion.button>
         </div>
+        </>
       )}
       {justPlayed && <p className="mt-2 font-cond text-sm italic text-leaf">Lagi diputar di layar booth 🎉</p>}
       {sync.failed && <p className="mt-2 font-cond text-sm italic text-terracotta">Gagal terkirim — cek sinyal, lalu coba lagi.</p>}

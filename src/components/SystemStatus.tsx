@@ -1,9 +1,10 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { CheckCircle2, CloudOff, MessageCircle, ServerCrash, WifiOff } from 'lucide-react'
+import { CheckCircle2, CloudOff, MessageCircle, RefreshCw, ServerCrash, WifiOff } from 'lucide-react'
 import { ADMIN_WA } from '../data/event'
 import { health, onHealth, onStats, pendingCount } from '../lib/backend'
 import { hhmm } from '../views/adminUi'
+import { useUpdateReady } from '../lib/updates'
 
 /*
  * One honest line about the system, on every page but the booth screen (it has its own island):
@@ -12,6 +13,7 @@ import { hhmm } from '../views/adminUi'
  *                                     itself later, or chat the admin · crew: a red bar with since
  *                                     when, how often, and what's waiting on this device
  *   - it came back                  → a short green "tersambung lagi" while the queues flush
+ *   - a new deploy is ready         → "versi baru · muat ulang" (lowest priority: one slot, nothing stacks)
  * While anything is wrong it keeps probing (the stats GET — cheap, cached by the Sheet), so it also
  * notices recovery on pages that don't poll by themselves.
  */
@@ -38,7 +40,8 @@ export function SystemStatus() {
     return () => window.clearInterval(t)
   }, [h.down])
 
-  const state = h.offline ? 'offline' : h.down ? 'down' : fresh ? 'back' : null
+  const update = useUpdateReady()
+  const state = h.offline ? 'offline' : h.down ? 'down' : fresh ? 'back' : update ? 'update' : null
   const mins = h.since ? Math.max(1, Math.round((Date.now() - h.since) / 60_000)) : 0
   const waiting = pendingCount()
 
@@ -64,7 +67,7 @@ export function SystemStatus() {
         <motion.div
           key={state}
           role="status"
-          className={`fixed left-1/2 top-3 z-[60] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2 rounded-full px-4 py-2 font-display text-sm font-semibold shadow-lg ${state === 'back' ? 'bg-leaf text-cream' : state === 'down' ? 'bg-[#e8b53a] text-brown' : 'bg-brown text-cream'}`}
+          className={`fixed left-1/2 top-3 z-[60] flex max-w-[calc(100vw-9rem)] -translate-x-1/2 sm:max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full px-4 py-2 font-display text-sm font-semibold shadow-lg ${state === 'back' ? 'bg-leaf text-cream' : state === 'down' ? 'bg-[#e8b53a] text-brown' : 'bg-brown text-cream'}`}
           initial={{ y: -40, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: -40, opacity: 0 }}
@@ -84,6 +87,11 @@ export function SystemStatus() {
                 </a>
               )}
             </>
+          )}
+          {state === 'update' && (
+            <button type="button" onClick={() => window.location.reload()} className="flex items-center gap-2">
+              <RefreshCw className="size-4 shrink-0 text-leaf-light" /> <span className="truncate">Versi baru · ketuk muat ulang</span>
+            </button>
           )}
           {state === 'back' && (
             <>

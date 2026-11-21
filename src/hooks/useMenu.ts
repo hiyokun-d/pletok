@@ -25,6 +25,8 @@ interface MenuState {
   closedAt?: number
   /** /config "Putar A+G": when the booth screen should play the attention show (epoch ms) */
   attnAt?: number
+  /** which attention show: 0–4, or -1 / missing = random */
+  attnShow?: number
   /** /config "Tema layar": the look of the menu screen, /cashier and /link */
   theme?: ThemeId
   /** last change, to tell the newer copy apart when syncing */
@@ -51,6 +53,7 @@ export interface LiveMenu {
   anySoldOut: boolean
   closedEarly: boolean
   attnAt?: number
+  attnShow?: number
   theme: ThemeId
 }
 
@@ -122,7 +125,7 @@ function derive(s: MenuState): LiveMenu {
     return { ...b, items, price: price(b.name, b.price), normal, detail: edited ? describe(items) : b.detail, soldOut: !!reason, reason, edited }
   })
   const allSoldOut = drinks.every((d) => d.soldOut)
-  return { drinks, bundles, allSoldOut, anySoldOut: drinks.some((d) => d.soldOut) || bundles.some((b) => b.soldOut), closedEarly: !!s.closedAt, attnAt: s.attnAt, theme: s.theme ?? 'classic' }
+  return { drinks, bundles, allSoldOut, anySoldOut: drinks.some((d) => d.soldOut) || bundles.some((b) => b.soldOut), closedEarly: !!s.closedAt, attnAt: s.attnAt, attnShow: s.attnShow, theme: s.theme ?? 'classic' }
 }
 
 // set up after the helpers above — derive() needs describe() when a saved bundle was edited
@@ -199,9 +202,9 @@ export function setTheme(theme: ThemeId) {
   commit({ ...state, theme })
 }
 
-/** A+G from a phone: the booth plays the attention show `delayMs` from now (null = cancel) */
-export function scheduleAttention(delayMs: number | null) {
-  commit({ ...state, attnAt: delayMs === null ? undefined : Date.now() + delayMs })
+/** A+G from a phone: the booth plays attention show `show` (-1 = random) `delayMs` from now (null = cancel) */
+export function scheduleAttention(delayMs: number | null, show = -1) {
+  commit({ ...state, attnAt: delayMs === null ? undefined : Date.now() + delayMs, attnShow: delayMs === null ? undefined : show })
 }
 
 /** today's menu price for a drink id or bundle name; `null` = back to the printed menu */

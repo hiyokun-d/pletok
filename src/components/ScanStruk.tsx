@@ -8,9 +8,11 @@ import type { QueueOrder } from '../lib/backend'
 /*
  * "Scan struk" on /pickup — the cashier → pickup hand-off with no network at all. The buyer's
  * struk QR carries the sale (lib/saleCode); scanning it puts that sale in this phone's queue.
- *   - browsers that read QR codes themselves (Chrome on Android, Chrome on a Mac): the camera opens right here
- *   - the rest (Safari / iPhone): the phone's own Camera app reads it → tap the link → the struk
- *     page shows crew phones a "Tambahkan ke pickup" button. Same result, one extra tap.
+ *   - the camera opens right here on every phone: browsers that read QR codes themselves (Chrome on
+ *     Android / Mac) use that; the rest (every iPhone, Samsung Internet, Firefox) read the frames
+ *     with jsQR, downloaded only when the scanner opens
+ *   - no camera / permission refused: the phone's own Camera app reads the struk → tap the link →
+ *     the struk page shows crew phones a "Tambahkan ke pickup" button. Same result, one extra tap.
  *   - a link sent over WhatsApp can be pasted in too
  * It also reads a pre-order's pickup QR (the customer's "Lunas!" screen): that's their /c/<kode cek>
  * link, the same one WhatsApp sent them. The order opens with its kode cek already filled in — the
@@ -18,12 +20,50 @@ import type { QueueOrder } from '../lib/backend'
  */
 
 type Detector = { detect: (src: CanvasImageSource) => Promise<Array<{ rawValue: string }>> }
-type DetectorCtor = new (o: { formats: string[] }) => Detector
+type DetectorCtor = (new (o: { formats: string[] }) => Detector) & { getSupportedFormats?: () => Promise<string[]> }
 const Native = (globalThis as unknown as { BarcodeDetector?: DetectorCtor }).BarcodeDetector
+const canCamera = !!navigator.mediaDevices?.getUserMedia
+/** a phone/laptop browser only offers the camera on https (or localhost) — a phone opening the dev
+ *  server as http://192.168…:5173 has no camera API at all, so say that instead of "no camera" */
+const insecure = !window.isSecureContext
+const touch = window.matchMedia('(pointer: coarse)').matches
+type Cam = 'starting' | 'on' | 'denied' | 'busy' | 'none' | 'insecure'
+const CAM_TEXT: Partial<Record<Cam, string>> = {
+  denied: 'Kamera ditolak. iPhone: Pengaturan › Safari › Kamera › Izinkan (atau ikon "aA" di address bar). Android: ikon gembok di address bar › Kamera. Atau pakai cara di bawah.',
+  busy: 'Kamera sedang dipakai aplikasi lain (video call, aplikasi kamera) — tutup dulu, lalu buka scan lagi.',
+}
+
+/** one frame of the camera → the QR's text (or null). The browser's own reader when it has a working
+ *  one; otherwise jsQR on a shrunk copy of the frame (≤ 640 px: quick even on a cheap phone) */
+async function makeReader(): Promise<(v: HTMLVideoElement) => Promise<string | null>> {
+  if (Native) {
+    try {
+      // some Androids have the API but no QR engine behind it — then it'd never find anything
+      const formats = await Native.getSupportedFormats?.()
+      if (!formats || formats.includes('qr_code')) {
+        const d = new Native({ formats: ['qr_code'] })
+        return async (v) => (await d.detect(v))[0]?.rawValue ?? null
+      }
+    } catch {
+      /* fall through to jsQR */
+    }
+  }
+  const { default: jsQR } = await import('jsqr')
+  const c = document.createElement('canvas')
+  const ctx = c.getContext('2d', { willReadFrequently: true })!
+  return async (v) => {
+    const k = Math.min(1, 640 / Math.max(v.videoWidth, v.videoHeight))
+    c.width = Math.round(v.videoWidth * k)
+    c.height = Math.round(v.videoHeight * k)
+    ctx.drawImage(v, 0, 0, c.width, c.height)
+    const img = ctx.getImageData(0, 0, c.width, c.height)
+    return jsQR(img.data, c.width, c.height, { inversionAttempts: 'dontInvert' })?.data ?? null
+  }
+}
 
 type Result = { kind: 'ok'; code: string; id: string; proof?: string; po?: boolean } | { kind: 'bad' | 'old' | 'other'; text: string }
 
-/** a pre-order pickup QR / link → its kode cek: …/c/BR5HA2 or …/preorder?cek=BR5HA2 */
+/** a pre-order pickup QR / link → its kode cek: …/c/K7Q2MX or …/preorder?cek=K7Q2MX */
 export const preorderRef = (text: string) =>
   text.trim().match(/\/c\/([A-Za-z0-9]{4,12})\/?(?:[?#].*)?$/)?.[1]?.toUpperCase() ?? text.trim().match(/[?&]cek=([A-Za-z0-9]{4,12})(?:[&#]|$)/)?.[1]?.toUpperCase()
 
@@ -71,16 +111,19 @@ function Sheet({ pin, known, byRef, onClose, onFound }: Props) {
   findRef.current = byRef
   // a camera facing you (laptop webcam, selfie camera) shows as a mirror — easier to aim the QR
   const [mirror, setMirror] = useState(false)
-  const [cam, setCam] = useState<'starting' | 'on' | 'denied' | 'none'>(Native ? 'starting' : 'none')
+  const [cam, setCam] = useState<Cam>(insecure ? 'insecure' : canCamera ? 'starting' : 'none')
   const [result, setResult] = useState<Result | null>(null)
   const [paste, setPaste] = useState('')
 
   useEffect(() => {
-    if (!Native) return
+    if (!canCamera) return
     let stream: MediaStream | null = null
     let live = true
     let t = 0
-    const detector = new Native({ formats: ['qr_code'] })
+    const reader = makeReader()
+    // a code that didn't work stays in front of the camera — check it once, not 4× a second
+    let last = ''
+    let lastAt = 0
     let busy = false
     const tick = async () => {
       if (!live) return
@@ -88,9 +131,14 @@ function Sheet({ pin, known, byRef, onClose, onFound }: Props) {
       if (v && v.readyState >= 2 && !busy) {
         busy = true
         try {
-          const [hit] = await detector.detect(v)
-          if (hit && live) {
-            const r = await take(pin, hit.rawValue, lookup.current, findRef.current)
+          const text = await (await reader)(v)
+          const again = text === last && Date.now() - lastAt < 4000
+          if (text) {
+            last = text
+            lastAt = Date.now()
+          }
+          if (text && live && !again) {
+            const r = await take(pin, text, lookup.current, findRef.current)
             setResult(r)
             if (r.kind === 'ok') {
               navigator.vibrate?.(80)
@@ -106,11 +154,15 @@ function Sheet({ pin, known, byRef, onClose, onFound }: Props) {
       t = window.setTimeout(tick, 220)
     }
     navigator.mediaDevices
-      ?.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
+      .getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
       .then((s) => {
         if (!live) return s.getTracks().forEach((x) => x.stop())
         stream = s
-        setMirror(s.getVideoTracks()[0]?.getSettings?.().facingMode !== 'environment')
+        // mirrored like a mirror only when the camera faces you (selfie camera, laptop webcam); the
+        // back camera stays true to life. Many Androids don't say which way it faces → a phone's
+        // camera counts as the back one, a laptop's as the webcam
+        const facing = s.getVideoTracks()[0]?.getSettings?.().facingMode
+        setMirror(facing ? facing === 'user' : !touch)
         if (video.current) {
           video.current.srcObject = s
           void video.current.play().catch(() => {})
@@ -118,7 +170,11 @@ function Sheet({ pin, known, byRef, onClose, onFound }: Props) {
         setCam('on')
         tick()
       })
-      .catch(() => live && setCam('denied'))
+      .catch((e: unknown) => {
+        if (!live) return
+        const name = (e as { name?: string })?.name
+        setCam(name === 'NotAllowedError' || name === 'SecurityError' ? 'denied' : name === 'NotFoundError' || name === 'OverconstrainedError' ? 'none' : 'busy')
+      })
     return () => {
       live = false
       window.clearTimeout(t)
@@ -150,17 +206,18 @@ function Sheet({ pin, known, byRef, onClose, onFound }: Props) {
         </div>
         <p className="mt-1 font-cond text-sm italic text-brown-soft">Struk kasir (jalan tanpa internet) atau QR pre-order dari layar "Lunas!".</p>
 
-        {cam !== 'none' && (
+        {cam === 'insecure' && (
+          <p className="mt-4 rounded-2xl bg-terracotta/10 p-3 text-sm text-terracotta">
+            Kamera hanya jalan di <b>https://</b> — halaman ini dibuka lewat http (mis. server dev di Wi-Fi). Buka <b>pletok.hiyokun.dev/pickup</b>, atau pakai cara di bawah.
+          </p>
+        )}
+        {cam !== 'none' && cam !== 'insecure' && (
           <div className="relative mt-4 aspect-square overflow-hidden rounded-3xl bg-brown">
             {/* muted + playsInline: iOS only plays a live camera inline like this */}
             <video ref={video} muted playsInline autoPlay className="size-full object-cover" style={mirror ? { transform: 'scaleX(-1)' } : undefined} />
             <span className="pointer-events-none absolute inset-[18%] rounded-3xl border-4 border-yakult/80" />
             {cam === 'starting' && <span className="absolute inset-0 grid place-items-center text-cream"><Loader2 className="size-8 animate-spin" /></span>}
-            {cam === 'denied' && (
-              <span className="absolute inset-0 grid place-items-center p-6 text-center text-sm text-cream">
-                Kamera ditolak. Izinkan kamera untuk situs ini di pengaturan browser — atau pakai cara di bawah.
-              </span>
-            )}
+            {CAM_TEXT[cam] && <span className="absolute inset-0 grid place-items-center p-6 text-center text-sm text-cream">{CAM_TEXT[cam]}</span>}
           </div>
         )}
 

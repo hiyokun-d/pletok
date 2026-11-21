@@ -9,6 +9,8 @@ import { ParticleField } from '../components/ParticleField'
 import { ease } from '../lib/motion'
 import { Flame, Leaf, ShieldCheck } from 'lucide-react'
 import { useMenu } from '../hooks/useMenu'
+import { useLite } from '../lib/perf'
+import { GigiBalang, Kawung, Lawang, Tumpal } from '../components/BetawiPattern'
 
 type Scene = 'count' | 'title' | 'logo' | 'halal' | 'tour' | 'finale'
 const STOPS = DRINKS.length + 1 // three drinks + the bundles
@@ -50,6 +52,8 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
   const [landKey, setLandKey] = useState<number>()
   const [boomKey, setBoomKey] = useState<number>()
   const [confettiKey, setConfettiKey] = useState<number>()
+  const [showDoors, setShowDoors] = useState(false)
+  const lite = useLite()
   const started = useRef(false)
   const done = useRef(false)
   const logoReady = useRef<() => void>(undefined)
@@ -69,6 +73,14 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
     return () => window.clearTimeout(t)
   }, [mode, manualLeft, scene])
 
+  // a phone has no Esc: two taps close together skip (one tap could be an accident)
+  const lastTap = useRef(0)
+  const tap = () => {
+    const now = Date.now()
+    if (now - lastTap.current < 400) finish()
+    lastTap.current = now
+  }
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && finish()
     window.addEventListener('keydown', onKey)
@@ -86,12 +98,16 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
   }, [left, mode, phase, scene])
 
   /** A giant leaf sweeps across the frame to hide the cut — the logo's own leaf, blown up */
-  const leafWipe = (flip = false) =>
-    animate(
+  // the leaf is sized by the screen's height (180vh wide), so on a tall phone ±120vw left most of it
+  // parked over the cups — it travels its own half-width past each edge instead, then hides
+  const leafWipe = (flip = false) => {
+    const d = window.innerWidth / 2 + window.innerHeight * 0.9 + 40
+    return animate(
       '.leaf-wipe',
-      { x: flip ? ['-120vw', '130vw'] : ['130vw', '-120vw'], y: ['30vh', '-25vh'], rotate: flip ? [40, -30] : [-40, 30], opacity: [1, 1] },
-      { duration: 1.1, ease: [0.5, 0, 0.5, 1] },
+      { x: flip ? [-d, d] : [d, -d], y: ['30vh', '-25vh'], rotate: flip ? [40, -30] : [-40, 30], opacity: [1, 1, 0] },
+      { duration: 1.1, ease: [0.5, 0, 0.5, 1], opacity: { duration: 1.1, times: [0, 0.97, 1] } },
     )
+  }
 
   const shake = (k = 1) => animate(scope.current, { x: [0, -14 * k, 11 * k, -7 * k, 4 * k, 0], y: [0, 9 * k, -6 * k, 4 * k, -2 * k, 0] }, { duration: 0.45 })
 
@@ -102,12 +118,19 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
     animate('.flash', { opacity: [0, 1, 0] }, { duration: 0.9, times: [0, 0.08, 1] })
     animate('.shock', { scale: [0, 4], opacity: [0.9, 0] }, { duration: 1.4, delay: (i: number) => i * 0.12, ease: ease.out })
     shake(1.4)
+    setShowDoors(true)
     await wait(260)
     setScene('title')
     await wait(60)
+    // the flash hides the cut: a pair of carved Betawi doors (lawang) is standing there — they swing open
+    animate('.door-l', { rotateY: [0, -110] }, { duration: 1.5, ease: [0.65, 0, 0.35, 1] })
+    animate('.door-r', { rotateY: [0, 110] }, { duration: 1.5, ease: [0.65, 0, 0.35, 1] })
+    animate('.doors', { opacity: [1, 1, 0] }, { duration: 1.5, times: [0, 0.75, 1] }).then(() => setShowDoors(false))
+    await wait(350)
 
     // ---- INTRODUCING: letters tighten while the camera creeps in, then we fly through the word
-    animate('.t-kicker', { opacity: [0, 1], letterSpacing: ['1.4em', '0.6em'] }, { duration: 1.4, ease: ease.out })
+    const narrow = window.innerWidth < window.innerHeight
+    animate('.t-kicker', { opacity: [0, 1], letterSpacing: narrow ? ['0.6em', '0.22em'] : ['1.4em', '0.6em'] }, { duration: 1.4, ease: ease.out })
     await wait(250)
     // letters spring up one by one, flipping in from below
     await animate(
@@ -160,7 +183,7 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
     await wait(40)
     leafWipe()
     animate('.h-layer', { x: ['0vw', '-100vw'], skewX: [0, 6, 0] }, { duration: 1.05, ease: PAN })
-    animate('.cam', { scale: [0.86, 0.86, 1] }, { duration: 1.05, times: [0, 0.4, 1], ease: PAN })
+    animate('.cam', { scale: [0.86, 0.86, 1], rotateY: [0, -14, 0] }, { duration: 1.05, times: [0, 0.4, 1], ease: PAN })
     animate('.leaf-bg', { x: ['12vw', '0vw'] }, { duration: 1.2, ease: PAN })
     await animate('.strip', { x: ['100vw', '0vw'], skewX: [0, -6, 0] }, { duration: 1.05, ease: PAN })
     setShowHalal(false)
@@ -174,7 +197,7 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
         leafWipe(i % 2 === 1)
         animate(`.name-${i - 1}`, { x: '-40vw' }, { duration: 1.1, ease: PAN })
         animate('.leaf-bg', { x: `${-i * 12}vw` }, { duration: 1.2, ease: PAN })
-        animate('.cam', { scale: [1, 0.84, 1] }, { duration: 1.05, ease: PAN })
+        animate('.cam', { scale: [1, 0.84, 1], rotateY: [0, i % 2 ? 12 : -12, 0] }, { duration: 1.05, ease: PAN })
         await animate('.strip', { x: `${-i * 100}vw`, skewX: [0, -6, 0] }, { duration: 1.05, ease: PAN })
       }
       setReached(i)
@@ -203,10 +226,12 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
     await wait(350)
     await animate(
       '.stamp',
-      { scale: [3.4, 0.92, 1.04, 1], rotate: [-24, -5, -7, -6], opacity: [0, 1, 1, 1] },
-      { duration: 0.55, ease: 'easeOut' },
+      { scale: [3.4, 0.92, 1.04, 1], rotate: [-24, -5, -7, -6], rotateX: [70, -8, 3, 0], opacity: [0, 1, 1, 1] },
+      { duration: 0.6, ease: 'easeOut' },
     )
     shake(1.3)
+    animate('.f-orn', { opacity: [0, 0.4], scale: [0.5, 1] }, { duration: 1.2, ease: ease.out })
+    animate('.f-band', { y: ['-100%', '0%'] }, { duration: 0.7, ease: ease.out })
     setConfettiKey(Date.now())
     animate('.stamp-dust', { scale: [0.6, 1.9], opacity: [0.7, 0] }, { duration: 0.7, ease: ease.out })
     await animate('.f-info', { opacity: [0, 1], y: [24, 0] }, { duration: 0.5, delay: (i: number) => i * 0.08, ease: ease.out })
@@ -224,12 +249,14 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
   return (
     <motion.div
       className="fixed inset-0 z-[60] overflow-hidden bg-[#2b160c]"
+      // quick: the page underneath was still showing through the countdown on a phone
       initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
+      animate={{ opacity: 1, transition: { duration: 0.25 } }}
+      onClick={tap}
       // no exit animation: the finale cuts straight to the open booth
       exit={{ opacity: 1, transition: { duration: 0 } }}
     >
-      <div ref={scope} className="absolute inset-0">
+      <div ref={scope} className="absolute inset-0" style={{ perspective: 1400 }}>
         {/* backdrop: roasted brown while counting → cream once the show starts */}
         <motion.div
           className="absolute inset-0"
@@ -251,10 +278,18 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
                 animate={{ opacity: 0.6 + urgency * 0.4 }}
                 style={{ background: 'radial-gradient(circle at 50% 50%, rgb(201 138 60 / 0.35), transparent 55%)' }}
               />
+              {/* standing under a Betawi roof: kawung batik behind, gigi balang hanging from the eaves */}
+              <Kawung className="pointer-events-none absolute inset-0 opacity-[0.06]" color="#f1d3a8" size={portrait ? 56 : 80} />
+              <motion.div className="pointer-events-none absolute inset-x-0 top-0" initial={{ y: '-100%' }} animate={{ y: '0%' }} transition={{ duration: 0.9, ease: ease.out }}>
+                <GigiBalang color="#1f0f07" accent="#c98a3c" size={portrait ? 30 : 44} />
+              </motion.div>
+              <motion.div className="pointer-events-none absolute inset-x-0 bottom-0 opacity-50" initial={{ y: '100%' }} animate={{ y: '0%' }} transition={{ duration: 0.9, ease: ease.out }}>
+                <Tumpal color="#1f0f07" accent="#c98a3c" size={portrait ? 22 : 32} />
+              </motion.div>
               <motion.p className="font-cond text-[clamp(1rem,2.6vh,1.6rem)] font-semibold uppercase italic tracking-[0.5em] text-yakult/80" initial={{ opacity: 0, letterSpacing: '1em' }} animate={{ opacity: 1, letterSpacing: '0.5em' }}>
                 Grand opening
               </motion.p>
-              <div className="relative grid h-[48vh] place-items-center">
+              <div className="relative grid h-[48vh] place-items-center [perspective:900px]">
                 {[0, 1].map((i) => (
                   <motion.span
                     key={`${left}-${i}`}
@@ -268,9 +303,9 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
                   <motion.span
                     key={left}
                     className="font-display text-[min(40vh,38vw)] font-bold leading-none tabular-nums [text-shadow:0_14px_0_rgb(0_0_0/0.25)]"
-                    initial={{ scale: 2.6, opacity: 0, rotate: -8 }}
-                    animate={{ scale: 1, opacity: 1, rotate: 0 }}
-                    exit={{ scale: 0.5, opacity: 0, y: -80 }}
+                    initial={{ scale: 1.8, opacity: 0, rotateX: -85 }}
+                    animate={{ scale: 1, opacity: 1, rotateX: 0 }}
+                    exit={{ scale: 0.7, opacity: 0, rotateX: 85, y: -40 }}
                     transition={{ type: 'spring', stiffness: 420, damping: 22 }}
                   >
                     {Math.max(left, 0)}
@@ -285,7 +320,7 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
         {/* ================= INTRODUCING ================= */}
         {scene === 'title' && (
           <div className="t-cam absolute inset-0 flex flex-col items-center justify-center text-cream will-change-transform">
-            <p className="t-kicker font-cond text-[clamp(0.9rem,2.4vh,1.4rem)] font-semibold uppercase italic text-yakult/70 opacity-0">
+            <p className="t-kicker max-w-[92vw] px-4 text-center font-cond text-[clamp(0.9rem,2.4vh,1.4rem)] font-semibold uppercase italic text-yakult/70 opacity-0">
               {EVENT.name} · {EVENT.campus} mempersembahkan
             </p>
             <ParticleField preset="leaf" overrides={{ count: 26, colors: ['#5e7b3a', '#8faa4f', '#a3b860'], opacity: 0.7 }} />
@@ -297,7 +332,7 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
               animate={{ opacity: 1, scale: 1 }}
               transition={{ duration: 1.6, ease: ease.out }}
             />
-            <h1 className="relative mt-[2vh] whitespace-nowrap py-[1vh] font-display text-[min(11vw,20vh)] font-bold uppercase leading-none">
+            <h1 className="relative mt-[2vh] whitespace-nowrap [perspective:700px] py-[1vh] font-display text-[min(11vw,20vh)] font-bold uppercase leading-none">
               <span className="flex [perspective:600px]">
                 {'Introducing'.split('').map((ch, i) => (
                   <span key={i} className="t-letter inline-block opacity-0 [text-shadow:0_0.06em_0_rgb(0_0_0/0.35)]" style={{ transformOrigin: '50% 100%' }}>
@@ -415,7 +450,17 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
             <div className={`f-logo absolute inset-x-0 mx-auto opacity-0 ${portrait ? 'top-[9vh] w-[72vw]' : 'top-[5vh] w-[min(34vw,52vh)]'}`}>
               <LogoRig interactive={false} />
             </div>
-            <div className="absolute left-1/2 top-[57%] -translate-x-1/2 -translate-y-1/2">
+            {/* a kawung medallion opens behind the stamp, like the carved panel above a Betawi door */}
+            <div
+              className="f-orn absolute left-1/2 top-[57%] size-[min(120vw,90vh)] -translate-x-1/2 -translate-y-1/2 opacity-0"
+              style={{ maskImage: 'radial-gradient(circle, #000 25%, transparent 66%)', WebkitMaskImage: 'radial-gradient(circle, #000 25%, transparent 66%)' }}
+            >
+              <Kawung className={`size-full ${lite ? '' : 'animate-[spin_80s_linear_infinite]'}`} color="#a8572a" size={52} />
+            </div>
+            <div className="f-band absolute inset-x-0 top-0" style={{ transform: 'translateY(-100%)' }}>
+              <GigiBalang color="#5a2e1a" accent="#c98a3c" size={portrait ? 26 : 38} />
+            </div>
+            <div className="absolute left-1/2 top-[57%] -translate-x-1/2 -translate-y-1/2 [perspective:800px]">
               <span className="stamp-dust absolute left-1/2 top-1/2 size-[34vh] -translate-x-1/2 -translate-y-1/2 rounded-full bg-terracotta/30 opacity-0" />
               <div className="stamp relative whitespace-nowrap rounded-2xl border-[5px] border-terracotta bg-cream px-[3vh] py-[1.2vh] font-display text-[min(9vh,8.5vw)] font-bold uppercase leading-none text-terracotta opacity-0 shadow-[0_10px_0_rgb(168_87_42/0.25)]">
                 Resmi dibuka!
@@ -434,6 +479,18 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
         {/* botanical backdrop: big swaying leaves frame every cream scene, drifting slower than the camera */}
         {!dark && <LeafBackdrop />}
 
+        {/* Betawi eaves over every cream scene: gigi balang along the top, a tumpal sarung border along the bottom */}
+        {!dark && scene !== 'finale' && (
+          <motion.div className="pointer-events-none absolute inset-x-0 top-0 opacity-80" initial={{ y: '-100%' }} animate={{ y: '0%' }} transition={{ duration: 0.7, ease: ease.out }}>
+            <GigiBalang color="#a8572a" accent="#f5ebdd" size={portrait ? 22 : 32} />
+          </motion.div>
+        )}
+        {!dark && (
+          <motion.div className="pointer-events-none absolute inset-x-0 bottom-0 opacity-25" initial={{ y: '100%' }} animate={{ y: '0%' }} transition={{ duration: 0.7, ease: ease.out }}>
+            <Tumpal color="#5e7b3a" accent="#f5ebdd" size={portrait ? 18 : 26} />
+          </motion.div>
+        )}
+
         {/* leaves drift through every cream scene — the jamu signature */}
         {!dark && scene !== 'finale' && <ParticleField preset="leaf" overrides={{ count: 34, travel: [50, 110], size: [12, 24] }} />}
 
@@ -443,6 +500,8 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
             <LogoRig interactive={false} />
           </div>
         )}
+
+        {showDoors && <Lawang className="doors z-10" />}
 
         {/* the leaf that wipes each cut */}
         <svg viewBox="0 0 59 49" className="leaf-wipe pointer-events-none absolute left-1/2 top-1/2 z-20 h-[150vh] w-[180vh] -translate-x-1/2 -translate-y-1/2 opacity-0" aria-hidden>
@@ -461,7 +520,7 @@ export function GrandOpening({ mode, onDone }: GrandOpeningProps) {
       </div>
 
       {!counting && (
-        <span className={`absolute bottom-3 right-4 z-10 font-cond text-xs font-semibold uppercase italic tracking-widest transition-colors duration-500 ${dark ? 'text-cream/35' : 'text-brown/35'}`}>esc · lewati</span>
+        <span className={`absolute bottom-3 right-4 z-10 font-cond text-xs font-semibold uppercase italic tracking-widest transition-colors duration-500 ${dark ? 'text-cream/35' : 'text-brown/35'}`}>{portrait ? 'ketuk 2× · lewati' : 'esc · lewati'}</span>
       )}
     </motion.div>
   )
@@ -721,3 +780,4 @@ function LeafBackdrop() {
     </div>
   )
 }
+

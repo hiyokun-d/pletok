@@ -333,7 +333,7 @@ export function PickupPage() {
             initial={{ y: -60, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: -60, opacity: 0 }}
-            className="fixed inset-x-3 top-3 z-50 flex items-center gap-3 rounded-2xl bg-[#e8b53a] p-3.5 text-left font-display text-brown shadow-2xl sm:inset-x-auto sm:left-1/2 sm:w-[28rem] sm:-translate-x-1/2"
+            className="fixed inset-x-3 top-16 z-50 flex items-center gap-3 rounded-2xl bg-[#e8b53a] p-3.5 text-left font-display text-brown shadow-2xl sm:inset-x-auto sm:left-1/2 sm:w-[28rem] sm:-translate-x-1/2"
           >
             <motion.span animate={{ rotate: [0, -14, 14, -8, 8, 0] }} transition={{ duration: 0.8 }}>
               <BellRing className="size-6" />

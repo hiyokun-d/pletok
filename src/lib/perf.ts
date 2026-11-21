@@ -98,5 +98,6 @@ if (touch && !saved) {
       }
     }
     requestAnimationFrame(tick)
-  }, 1500)
+    // after the intro (~6 s): timing frames during it would call a mid-range phone slow
+  }, 7000)
 }

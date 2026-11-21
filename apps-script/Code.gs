@@ -216,12 +216,25 @@ const boothState_ = (v) => ({ diproses: 'process', siap: 'ready', selesai: 'done
 const boothRows_ = (sh) => (sh.getLastRow() < 2 ? [] : sh.getRange(2, 1, sh.getLastRow() - 1, BOOTH_COLS.length).getValues())
 
 /* ---- one crew PIN (CREW_PIN) opens every crew page. A wrong one is written to "Keamanan" and answered
-   3 s late — while holding the script lock, so guesses go one at a time: trying every 6-digit PIN
-   would take weeks, not minutes. */
+   3 s late — after letting go of the lock, so a flood of wrong PINs never holds up customers' orders.
+   Guessing is capped instead: past PIN_BUDGET wrong PINs in 10 minutes (no crew typos that much — it's
+   someone trying them all) every PIN check answers "busy" until it calms down, and the admins get an
+   email. Crew phones keep their PIN and retry; a 6-digit PIN would take months to guess this way. */
 const SECURITY_COLS = ['Waktu', 'Kejadian', 'Dari', 'Perangkat', 'Detail']
+const PIN_BUDGET = 100
+let LOCK_ = null
+const pinLocked_ = () => Number(CacheService.getScriptCache().get('pin-bad') || 0) >= PIN_BUDGET
 function allowed_(b) {
   if (b.pin && String(b.pin) === PropertiesService.getScriptProperties().getProperty('CREW_PIN')) return true
   securityLog_('PIN salah', clip_(b.type, 30), b.ua, b.pin ? String(b.pin).length + ' digit' : 'kosong')
+  const cache = CacheService.getScriptCache()
+  const bad = Number(cache.get('pin-bad') || 0) + 1
+  cache.put('pin-bad', String(bad), 600)
+  if (bad === PIN_BUDGET) alertAdmin_('Serangan PIN', PIN_BUDGET + ' PIN salah dalam 10 menit — semua cek PIN dijeda sampai reda. Cek tab "Keamanan".')
+  if (LOCK_) {
+    LOCK_.releaseLock()
+    LOCK_ = null
+  }
   Utilities.sleep(3000)
   return false
 }
@@ -231,7 +244,7 @@ function securityLog_(what, from, ua, detail) {
   const n = Number(cache.get('sec-n') || 0)
   if (n >= 60) return
   cache.put('sec-n', String(n + 1), 600)
-  sheet_('Keamanan', SECURITY_COLS).appendRow([new Date(), what, clip_(from, 60), clip_(ua, 200), clip_(detail, 120)])
+  sheet_('Keamanan', SECURITY_COLS).appendRow([new Date(), what, cell_(from, 60), cell_(ua, 200), cell_(detail, 120)])
 }
 
 /* ---- when something breaks: a row in "Keamanan" + an email (at most one per 15 min, so an outage
@@ -275,11 +288,18 @@ function sheet_(name, cols) {
 
 const json_ = (o) => ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON)
 const clip_ = (v, n) => String(v == null ? '' : v).slice(0, n || 2000)
+/** text a visitor typed, for a cell: "=IMAGE(…)" / "+…" / "@…" would run as a formula (and could send
+ *  the Sheet's data somewhere) — a leading ' keeps it plain text, and Sheets doesn't show the ' */
+const cell_ = (v, n) => {
+  const t = clip_(v, n)
+  return /^[=+@\-\t\r]/.test(t) ? "'" + t : t
+}
 
 function doPost(e) {
   // many phones at once: one writer at a time so rows never collide. Too busy → a clean "busy" the
   // phone retries (waitLock would throw outside any guard and Google answers with an HTML error page)
   const lock = LockService.getScriptLock()
+  LOCK_ = lock
   if (!lock.tryLock(25000)) {
     alertAdmin_('Server penuh', 'Terlalu banyak permintaan sekaligus — ada yang harus mengantre lebih dari 25 detik.')
     return json_({ ok: false, error: 'busy' })
@@ -287,6 +307,8 @@ function doPost(e) {
   let b = {}
   try {
     b = JSON.parse(e.postData.contents)
+    // someone is trying PINs: every crew request waits it out ("busy" — the phones retry, nobody is signed out)
+    if (b.pin !== undefined && pinLocked_()) return json_({ ok: false, error: 'busy' })
     const props = PropertiesService.getScriptProperties()
     const now = new Date()
 
@@ -299,15 +321,15 @@ function doPost(e) {
       if (ids.indexOf(b.id) === -1) {
         sh.appendRow([
           b.at ? new Date(b.at) : now, clip_(b.id, 64), Number(b.rating) || '', [].concat(b.favorites || b.favorite || []).map((id) => DRINK_NAMES[id]).filter(Boolean).join(', '),
-          clip_(b.like), clip_(b.wish), clip_(b.question), clip_(b.idea),
-          clip_(b.name, 120), clip_(b.contact, 160), b.consent ? 'ya' : 'tidak', clip_(b.source, 40), clip_(b.ua, 200),
+          cell_(b.like), cell_(b.wish), cell_(b.question), cell_(b.idea),
+          cell_(b.name, 120), cell_(b.contact, 160), b.consent ? 'ya' : 'tidak', cell_(b.source, 40), cell_(b.ua, 200),
         ])
       }
       return json_({ ok: true })
     }
 
     if (b.type === 'scan') {
-      sheet_('Scans', SCAN_COLS).appendRow([now, clip_(b.target, 20), clip_(b.ua, 200)])
+      sheet_('Scans', SCAN_COLS).appendRow([now, cell_(b.target, 20), cell_(b.ua, 200)])
       return json_({ ok: true })
     }
 
@@ -337,7 +359,7 @@ function doPost(e) {
       const queuedAt = Number(b.queuedAt) || 0
       const inTime = Date.now() <= cfg.cutoff || (queuedAt && queuedAt <= cfg.cutoff && Date.now() - cfg.cutoff < 6 * 3600000)
       if (!cfg.enabled || !inTime) return json_({ ok: false, error: 'closed' })
-      const name = clip_(b.name, 80).trim()
+      const name = cell_(clip_(b.name, 80).trim())
       const wa = String(b.wa || '').replace(/[^0-9+]/g, '')
       if (!name || wa.replace(/\D/g, '').length < 9) return json_({ ok: false, error: 'contact' })
       const lines = []
@@ -364,7 +386,7 @@ function doPost(e) {
       // no pickup code yet: it waits on hold until an admin finds the transfer
       const ref = newRef_(rows)
       const late = queuedAt && Date.now() - queuedAt > 60000 ? '[masuk tertunda ' + Math.round((Date.now() - queuedAt) / 60000) + ' mnt] ' : ''
-      sh.appendRow([now, '', clip_(b.id, 64), name, "'" + wa, lines.map((l) => l.qty + '× ' + l.name).join(', '), pay * 1000, late + clip_(b.note, 300), STATUS.hold, JSON.stringify(lines), 'BCA', clip_(b.sender, 80), '', ref, '', promo * 1000])
+      sh.appendRow([now, '', clip_(b.id, 64), name, "'" + wa, lines.map((l) => l.qty + '× ' + l.name).join(', '), pay * 1000, late + cell_(b.note, 300), STATUS.hold, JSON.stringify(lines), 'BCA', cell_(b.sender, 80), '', ref, '', promo * 1000])
       if (promo) CacheService.getScriptCache().remove('stats') // slots left changes for everyone
       return json_({ ok: true, status: 'hold', total: pay, ref: ref, promo: promo, promoWhy: pc.why })
     }
@@ -468,8 +490,8 @@ function doPost(e) {
     // admin (/hasil): verify (hold → process, hands out the pickup code), picked up, rejected,
     // and "code sent on WhatsApp" — the order is found by its id
     if (b.type === 'preorder-status') {
-      CacheService.getScriptCache().remove('stats') // a rejected promo order frees its slot
       if (!allowed_(b)) return json_({ ok: false, error: 'pin' })
+      CacheService.getScriptCache().remove('stats') // a rejected promo order frees its slot
       const sh = orderSheet_()
       const rows = orderRows_(sh)
       const i = rows.map((r) => String(r[2])).indexOf(String(b.id))
@@ -599,7 +621,7 @@ function doPost(e) {
       let ref = ''
       do ref = newRef_([]) // same alphabet as the pre-orders' kode cek
       while (used.indexOf(ref) !== -1)
-      sh.appendRow([now, code, clip_(b.id, 64), clip_(b.name, 60), lines.map((l) => l.qty + '× ' + l.name).join(', '), total * 1000, b.pay === 'qris' ? 'QRIS' : b.pay === 'bca' ? 'Transfer BCA' : 'Tunai', BOOTH_STATUS.process, JSON.stringify(lines), clip_(b.note, 200), '', ref, ''])
+      sh.appendRow([now, code, clip_(b.id, 64), cell_(b.name, 60), lines.map((l) => l.qty + '× ' + l.name).join(', '), total * 1000, b.pay === 'qris' ? 'QRIS' : b.pay === 'bca' ? 'Transfer BCA' : 'Tunai', BOOTH_STATUS.process, JSON.stringify(lines), cell_(b.note, 200), '', ref, ''])
       receiptsChanged_()
       return json_({ ok: true, code: code })
     }
@@ -716,7 +738,9 @@ function doPost(e) {
     alertAdmin_('Error server', (b.type || '?') + ': ' + String(err))
     return json_({ ok: false, error: String(err) })
   } finally {
-    lock.releaseLock()
+    // a wrong PIN already let go of it (allowed_)
+    if (LOCK_) lock.releaseLock()
+    LOCK_ = null
   }
 }
 

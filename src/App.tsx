@@ -13,7 +13,7 @@ import { DesktopKiosk } from './views/DesktopKiosk'
 import { PreOpenStage } from './views/PreOpenStage'
 import { ClosingSequence } from './views/ClosingSequence'
 import { GrandOpening } from './views/GrandOpening'
-import { AttentionShow } from './components/AttentionShow'
+import { AttentionShow, SHOW_COUNT } from './components/AttentionShow'
 import { HypeLayer } from './components/HypeLayer'
 import { SoldOutStage } from './views/SoldOutStage'
 import { useMenu } from './hooks/useMenu'
@@ -41,6 +41,8 @@ export default function App() {
   const [intro, setIntro] = useState(!skipIntro && !closed)
   const [egg, setEgg] = useState(false)
   const [attention, setAttention] = useState(0)
+  // which of the attention shows plays (see AttentionShow)
+  const [attnShow, setAttnShow] = useState(0)
   const [grand, setGrand] = useState<'auto' | 'manual' | null>(null)
   const autoPlayed = useRef(false)
   // the blueprint build-up belongs to the ceremony only — every other entrance is the plain one
@@ -65,21 +67,24 @@ export default function App() {
   // A+G sent from /config: the booth screen plays it at the time the phone picked (a short delay so
   // the screen has polled the Sheet by then). Shows older than ~20 s are never replayed on a reload.
   const attnAt = menu.attnAt
+  const attnPick = menu.attnShow
   const attnSeen = useRef(0)
   useEffect(() => {
     if (!desktop || !attnAt || attnAt <= attnSeen.current || attnAt < Date.now() - 20_000) return
     attnSeen.current = attnAt
-    const t = window.setTimeout(() => setAttention(Date.now()), Math.max(0, attnAt - Date.now()))
+    // "acak" picks from the send time, so every booth screen plays the same one
+    const show = attnPick !== undefined && attnPick >= 0 ? attnPick % SHOW_COUNT : attnAt % SHOW_COUNT
+    const t = window.setTimeout(() => (setAttnShow(show), setAttention(Date.now())), Math.max(0, attnAt - Date.now()))
     return () => {
       window.clearTimeout(t)
       attnSeen.current = 0 // cancelled or rescheduled → let the new time through
     }
-  }, [attnAt, desktop])
+  }, [attnAt, attnPick, desktop])
 
   useEffect(() => {
     const offGrand = signal.on('grand-opening', () => setGrand('manual'))
     const offIntro = signal.on('replay-intro', () => setIntro(true))
-    const offAttn = signal.on('attention', () => setAttention(Date.now()))
+    const offAttn = signal.on('attention', () => (setAttnShow(Math.floor(Math.random() * SHOW_COUNT)), setAttention(Date.now())))
     return () => {
       offGrand()
       offIntro()
@@ -109,7 +114,7 @@ export default function App() {
         {intro && <Intro key="intro" onDone={() => setIntro(false)} />}
         {egg && <PletokEgg key="egg" onDone={() => setEgg(false)} />}
         {/* crew A + G: a loud 7 s show to pull people to the table (not during the ceremony) */}
-        {attention > 0 && !grand && <AttentionShow key={`attn-${attention}`} onDone={() => setAttention(0)} />}
+        {attention > 0 && !grand && <AttentionShow key={`attn-${attention}`} show={attnShow} onDone={() => setAttention(0)} />}
         {grand && <GrandOpening key="grand" mode={grand} onDone={finishGrand} />}
       </AnimatePresence>
       {/* one island for everything live: the phone countdown before we open + every remote change from /config */}

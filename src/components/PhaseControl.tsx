@@ -83,14 +83,17 @@ export function PhaseControl() {
     }
   }, [])
 
-  // touch fallback: long-press an invisible corner
+  const touchOnly = window.matchMedia('(pointer: coarse)').matches
+  // touch fallback: long-press an invisible corner — top-left, where nothing tappable lives
+  // (bottom-left sat on the menu's dock and swallowed taps on its first button on small phones)
   let pressTimer: number | undefined
   const corner = (
     <div
-      className="fixed bottom-0 left-0 z-[70] size-12"
+      className="fixed left-0 top-0 z-[70] size-12"
       onPointerDown={() => (pressTimer = window.setTimeout(() => setOpen(true), 1200))}
       onPointerUp={() => window.clearTimeout(pressTimer)}
       onPointerLeave={() => window.clearTimeout(pressTimer)}
+      onPointerCancel={() => window.clearTimeout(pressTimer)}
     />
   )
 
@@ -101,7 +104,8 @@ export function PhaseControl() {
 
   return (
     <>
-      {corner}
+      {/* keyboards have A+B — only a touch screen needs the corner */}
+      {touchOnly && corner}
       <AnimatePresence>
         {open && (
           <motion.div
