@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { usePath } from '../lib/nav'
 import { motion, useReducedMotion, useSpring, useTransform, type MotionValue } from 'motion/react'
-import { useMenu } from '../hooks/useMenu'
 import { useLite } from '../lib/perf'
 
 /*
@@ -26,21 +24,7 @@ import { useLite } from '../lib/perf'
  * (lib/perf.ts) — which also skips the lens layer, a full-screen blend over the scrolling page.
  */
 
-const PATHS = ['', '/link', '/cashier']
-
-export function ThemeHost() {
-  const { theme } = useMenu()
-  const path = usePath()
-  const on = theme === 'sunset' && PATHS.includes(path)
-  useEffect(() => {
-    if (!on) return
-    document.documentElement.dataset.theme = 'sunset'
-    return () => void delete document.documentElement.dataset.theme
-  }, [on])
-  return on ? <SunsetScene calm={path === '/cashier'} /> : null
-}
-
-function SunsetScene({ calm }: { calm: boolean }) {
+export function SunsetScene({ calm }: { calm: boolean }) {
   const lite = useLite()
   const still = !!useReducedMotion() || lite
   // the wind: -1 (blowing left) … 1 (right); a loose spring, so it overshoots and settles like air

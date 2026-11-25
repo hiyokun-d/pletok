@@ -9,7 +9,7 @@ import { usePreorder } from '../hooks/usePreorder'
 import { PREORDER_ITEMS, rupiah } from '../data/preorder'
 import { spring } from '../lib/motion'
 import { csvBlob, saveFile } from '../lib/download'
-import { Btn, Card, CrewNav, DEMO, Empty, PinGate, Shell, Tile, WAIT, dayTime, hhmm, useCrewPage, wait } from './adminUi'
+import { Btn, Card, CrewNav, DEMO, PinGate, Shell, Tile, WAIT, dayTime, hhmm, useCrewPage, wait, SheetUnplugged } from './adminUi'
 
 /**
  * Crew-only results (/hasil), laid out like Google Forms' "Ringkasan" tab: headline numbers,
@@ -64,7 +64,7 @@ export function HasilPage() {
     return () => window.clearInterval(t)
   }, [load])
 
-  if (!BACKEND && !DEMO) return <Shell><Empty title="Belum tersambung" text="VITE_BACKEND_URL belum diisi — lihat apps-script/README.md." /></Shell>
+  if (!BACKEND && !DEMO) return <Shell><SheetUnplugged page="Hasil" /></Shell>
   if (!pin) return <Shell><PinGate title="Hasil Pletok" wrong={state === 'pin'} onOk={setPin} /></Shell>
 
   return (

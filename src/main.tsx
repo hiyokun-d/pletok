@@ -6,7 +6,7 @@ import { GoHop, type HopTarget } from './views/GoHop'
 import { TRAP_PATH, TrapPage } from './views/TrapPage'
 import { SystemStatus } from './components/SystemStatus'
 import { CrewRouter } from './components/CrewRouter'
-import { ThemeHost } from './components/SunsetTheme'
+import { ThemeHost } from './components/ThemeHost'
 import { watchUpdates } from './lib/updates'
 import { ErrorBoundary, ErrorPage, type ErrorKind } from './views/ErrorPage'
 import { beforeSend, installClickTracking, trackSource } from './lib/analytics'
@@ -29,8 +29,9 @@ const receipt = path.match(/^\/r\/([A-Za-z0-9-]{8,64})$/)?.[1]
  * then it renders in one go (no second spinner).
  */
 const PAGES: Record<string, () => Promise<ReactNode>> = {
-  '': () => import('./App').then((m) => <m.default />),
+  '': () => import('./App').then(async (m) => (await m.preloadFirst().catch(() => {}), <m.default />)),
   '/link': () => import('./views/LinksPage').then((m) => <m.LinksPage />),
+  '/gallery': () => import('./views/GalleryPage').then((m) => <m.GalleryPage />),
   '/feedback': () => import('./views/FeedbackPage').then((m) => <m.FeedbackPage />),
   '/hasil': () => import('./views/HasilPage').then((m) => <m.HasilPage />),
   '/financial': () => import('./views/FinancialPage').then((m) => <m.FinancialPage />),
@@ -92,7 +93,7 @@ createRoot(document.getElementById('root')!).render(
     {/* the look picked on /config (menu, /cashier, /link) */}
     {!hop && <ThemeHost />}
     {/* offline / Sheet down / back again / new version ready — the booth app has its own island for this */}
-    {!hop && path !== '' && <SystemStatus />}
+    {!hop && path !== '' && path !== '/gallery' && <SystemStatus />}
     {/* free Vercel Web Analytics + Speed Insights (only report on the deployed site, not localhost) */}
     <Analytics beforeSend={beforeSend} />
     {!hop && <SpeedInsights />}

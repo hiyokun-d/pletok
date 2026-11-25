@@ -1,14 +1,76 @@
-export const EVENT = {
+/**
+ * The event, as the crew set it on /config ("Acara"). The defaults below are the BINUS Festival day;
+ * when Pletok opens again, change it on /config — every screen follows, no recoding. Saved in the
+ * synced menu state (hooks/useMenu), and on this device, so it holds even with the Sheet unplugged.
+ */
+export interface EventSettings {
+  name: string
+  /** YYYY-MM-DD, WIB */
+  date: string
+  /** HH:MM, WIB */
+  open: string
+  close: string
+  place: string
+  campus: string
+  table: string
+  /** after closing: the recap page (numbers, crew, reviews, gallery) instead of the plain thank-you */
+  recap: boolean
+}
+export const EVENT_DEFAULTS: EventSettings = {
   name: "BINUS Festival",
-  open: new Date("2026-11-25T13:00:00+07:00"),
-  close: new Date("2026-11-25T16:00:00+07:00"),
-  lastCallMinutes: 30,
-  dateLabel: "Rabu, 25 November 2026",
-  timeLabel: "13.00 – 16.00 WIB",
+  date: "2026-11-25",
+  open: "13:00",
+  close: "16:00",
   place: "Balkon Lantai 2",
   campus: "BINUS Anggrek",
   table: "Meja 9",
-} as const;
+  recap: true,
+};
+
+export interface EventInfo extends Omit<EventSettings, "open" | "close"> {
+  open: Date
+  close: Date
+  lastCallMinutes: number
+  /** "Rabu, 25 November 2026" */
+  dateLabel: string
+  /** "13.00 – 16.00 WIB" */
+  timeLabel: string
+}
+
+const at = (date: string, time: string) => new Date(`${date}T${time}:00+07:00`)
+function build(s: EventSettings): EventInfo {
+  const open = at(s.date, s.open)
+  const close = at(s.date, s.close)
+  // a typo on /config never takes the site down: fall back to the defaults' times
+  const ok = !Number.isNaN(open.getTime()) && !Number.isNaN(close.getTime()) && close > open
+  const o = ok ? open : at(EVENT_DEFAULTS.date, EVENT_DEFAULTS.open)
+  const c = ok ? close : at(EVENT_DEFAULTS.date, EVENT_DEFAULTS.close)
+  const dateLabel = o.toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", weekday: "long", day: "numeric", month: "long", year: "numeric" })
+  const hm = (d: Date) => d.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" }).replace(":", ".")
+  return { ...s, open: o, close: c, lastCallMinutes: 30, dateLabel, timeLabel: `${hm(o)} – ${hm(c)} WIB` }
+}
+
+let settings: EventSettings = (() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem("pletok:menu") ?? "null")?.event as Partial<EventSettings> | undefined
+    return { ...EVENT_DEFAULTS, ...saved }
+  } catch {
+    return EVENT_DEFAULTS
+  }
+})()
+
+/** read anywhere, always current: /config changes it in place */
+export const EVENT: EventInfo = build(settings)
+
+export const eventSettings = () => settings
+/** a newer copy from /config (or the Sheet) → every reader of EVENT sees it on its next render */
+export function applyEvent(next: Partial<EventSettings> | undefined) {
+  const merged = { ...EVENT_DEFAULTS, ...next }
+  if (JSON.stringify(merged) === JSON.stringify(settings)) return false
+  settings = merged
+  Object.assign(EVENT, build(settings))
+  return true
+}
 
 export const INSTAGRAM_URL = "https://www.instagram.com/pletok._/";
 export const INSTAGRAM_HANDLE = "@pletok._";

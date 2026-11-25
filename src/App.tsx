@@ -1,22 +1,53 @@
 import { AnimatePresence, MotionConfig } from 'motion/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { phaseAt, setForcedPhase, useEventPhase } from './hooks/useEventPhase'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
+import { phaseAt, phaseNow, setForcedPhase, useEventPhase } from './hooks/useEventPhase'
 import { useIsDesktop } from './hooks/useIsDesktop'
 import { signal } from './lib/events'
 import { trackClick } from './lib/analytics'
-import { Intro } from './components/Intro'
-import { PletokEgg } from './components/PletokEgg'
 import { PhaseControl } from './components/PhaseControl'
 import { LiveIsland } from './components/LiveIsland'
-import { MobileSite } from './views/MobileSite'
-import { DesktopKiosk } from './views/DesktopKiosk'
-import { PreOpenStage } from './views/PreOpenStage'
-import { ClosingSequence } from './views/ClosingSequence'
-import { GrandOpening } from './views/GrandOpening'
-import { AttentionShow, SHOW_COUNT } from './components/AttentionShow'
 import { HypeLayer } from './components/HypeLayer'
-import { SoldOutStage } from './views/SoldOutStage'
+import { SHOW_COUNT } from './data/shows'
 import { useMenu } from './hooks/useMenu'
+import { EVENT } from './data/event'
+
+/*
+ * Every stage is its own download: after the event a visitor (on the cheapest phone, on mobile data)
+ * only pulls the recap — not the menu, kiosk, ceremony and shows it will never see. Before and
+ * during the event the stages that could come next load in the background (see `warm` below).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const view = <M extends Record<K, ComponentType<any>>, K extends keyof M>(load: () => Promise<M>, name: K) => lazy(() => load().then((m) => ({ default: m[name] })))
+const Intro = view(() => import('./components/Intro'), 'Intro')
+const PletokEgg = view(() => import('./components/PletokEgg'), 'PletokEgg')
+const MobileSite = view(() => import('./views/MobileSite'), 'MobileSite')
+const DesktopKiosk = view(() => import('./views/DesktopKiosk'), 'DesktopKiosk')
+const PreOpenStage = view(() => import('./views/PreOpenStage'), 'PreOpenStage')
+const ClosingSequence = view(() => import('./views/ClosingSequence'), 'ClosingSequence')
+const GrandOpening = view(() => import('./views/GrandOpening'), 'GrandOpening')
+const AttentionShow = view(() => import('./components/AttentionShow'), 'AttentionShow')
+const SoldOutStage = view(() => import('./views/SoldOutStage'), 'SoldOutStage')
+const RecapSite = view(() => import('./views/RecapSite'), 'RecapSite')
+/** the booth's live stages, fetched while the browser is idle so a phase change never waits on the network */
+const warm = () =>
+  [
+    () => import('./components/Intro'),
+    () => import('./views/MobileSite'),
+    () => import('./views/DesktopKiosk'),
+    () => import('./views/PreOpenStage'),
+    () => import('./views/ClosingSequence'),
+    () => import('./views/GrandOpening'),
+    () => import('./components/AttentionShow'),
+    () => import('./views/SoldOutStage'),
+    () => import('./components/PletokEgg'),
+  ].forEach((f) => void f().catch(() => {}))
+
+/** main.tsx keeps the boot screen up until the first stage's code is here too — no blank flash in between */
+export function preloadFirst(): Promise<unknown> {
+  if (phaseNow() === 'closed') return EVENT.recap ? import('./views/RecapSite') : import('./views/ClosingSequence')
+  const desktop = window.matchMedia('(min-width: 1024px) and (pointer: fine)').matches
+  return Promise.all([skipIntro ? null : import('./components/Intro'), desktop ? import('./views/DesktopKiosk') : import('./views/MobileSite')])
+}
 
 const skipIntro = new URLSearchParams(window.location.search).has('nointro')
 
@@ -39,6 +70,16 @@ export default function App() {
   const desktop = useIsDesktop()
   const closed = phase === 'closed' || (menu.closedEarly && selling)
   const [intro, setIntro] = useState(!skipIntro && !closed)
+  // after closing, the recap page (/config "Acara" can turn it off). Closing while someone's watching
+  // (the booth laptop at 16:00, A+B, "tutup sekarang") plays the leaf-storm show first, then the recap.
+  const recap = EVENT.recap
+  const [closingShow, setClosingShow] = useState(false)
+  const wasClosed = useRef(closed)
+  useEffect(() => {
+    if (closed && !wasClosed.current) setClosingShow(true)
+    if (!closed) setClosingShow(false)
+    wasClosed.current = closed
+  }, [closed])
   const [egg, setEgg] = useState(false)
   const [attention, setAttention] = useState(0)
   // which of the attention shows plays (see AttentionShow)
@@ -81,6 +122,13 @@ export default function App() {
     }
   }, [attnAt, attnPick, desktop])
 
+  // the booth is live (or about to be): fetch every stage it might switch to while the browser is idle
+  useEffect(() => {
+    if (closed) return
+    const t = window.setTimeout(warm, 2500)
+    return () => window.clearTimeout(t)
+  }, [closed])
+
   useEffect(() => {
     const offGrand = signal.on('grand-opening', () => setGrand('manual'))
     const offIntro = signal.on('replay-intro', () => setIntro(true))
@@ -104,18 +152,47 @@ export default function App() {
 
   return (
     <MotionConfig reducedMotion="user">
+      {/* each stage waits for its own code (fallback: nothing — the boot screen covers the first one) */}
       <AnimatePresence mode="wait">
         {/* nothing renders under the ceremony, so the booth's entrance plays the moment it ends */}
-        {!intro && !closed && !grand && soldOutShown && <SoldOutStage key="soldout" desktop={desktop} />}
-        {!intro && !closed && !grand && !soldOutShown && (desktop ? (countdownStage ? <PreOpenStage key="pre" onEgg={openEgg} /> : <DesktopKiosk key={`desk-${buildRun}`} onEgg={openEgg} preview={phase === 'pre-open'} build={buildKiosk} onBuilt={built} />) : <MobileSite key="mob" onEgg={openEgg} />)}
-        {!intro && closed && <ClosingSequence key="closed" desktop={desktop} />}
+        {!intro && !closed && !grand && soldOutShown && (
+          <Suspense key="soldout" fallback={null}>
+            <SoldOutStage desktop={desktop} />
+          </Suspense>
+        )}
+        {!intro && !closed && !grand && !soldOutShown && (
+          <Suspense key={desktop ? (countdownStage ? 'pre' : `desk-${buildRun}`) : 'mob'} fallback={null}>
+            {desktop ? countdownStage ? <PreOpenStage onEgg={openEgg} /> : <DesktopKiosk onEgg={openEgg} preview={phase === 'pre-open'} build={buildKiosk} onBuilt={built} /> : <MobileSite onEgg={openEgg} />}
+          </Suspense>
+        )}
+        {!intro && closed && (
+          <Suspense key={recap && !closingShow ? 'recap' : 'closed'} fallback={null}>
+            {recap && !closingShow ? <RecapSite desktop={desktop} onReplay={() => setClosingShow(true)} /> : <ClosingSequence desktop={desktop} onDone={recap ? () => setClosingShow(false) : undefined} />}
+          </Suspense>
+        )}
       </AnimatePresence>
       <AnimatePresence>
-        {intro && <Intro key="intro" onDone={() => setIntro(false)} />}
-        {egg && <PletokEgg key="egg" onDone={() => setEgg(false)} />}
+        {intro && (
+          <Suspense key="intro" fallback={null}>
+            <Intro onDone={() => setIntro(false)} />
+          </Suspense>
+        )}
+        {egg && (
+          <Suspense key="egg" fallback={null}>
+            <PletokEgg onDone={() => setEgg(false)} />
+          </Suspense>
+        )}
         {/* crew A + G: a loud 7 s show to pull people to the table (not during the ceremony) */}
-        {attention > 0 && !grand && <AttentionShow key={`attn-${attention}`} show={attnShow} onDone={() => setAttention(0)} />}
-        {grand && <GrandOpening key="grand" mode={grand} onDone={finishGrand} />}
+        {attention > 0 && !grand && (
+          <Suspense key={`attn-${attention}`} fallback={null}>
+            <AttentionShow show={attnShow} onDone={() => setAttention(0)} />
+          </Suspense>
+        )}
+        {grand && (
+          <Suspense key="grand" fallback={null}>
+            <GrandOpening mode={grand} onDone={finishGrand} />
+          </Suspense>
+        )}
       </AnimatePresence>
       {/* one island for everything live: the phone countdown before we open + every remote change from /config */}
       <LiveIsland desktop={desktop} phaseBase={!desktop && phase === 'pre-open'} hidden={intro || !!grand || egg} />

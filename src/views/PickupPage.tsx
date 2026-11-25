@@ -6,7 +6,7 @@ import { cachedQueue, forgetSales, localSales, marks, onCrewLocal, saveQueue, se
 import { ScanStruk } from '../components/ScanStruk'
 import { PREORDER_ITEMS } from '../data/preorder'
 import { DRINKS } from '../data/menu'
-import { CrewNav, Empty, PinGate, Shell, hhmm, useCrewPage } from './adminUi'
+import { CrewNav, PinGate, Shell, hhmm, useCrewPage, SheetUnplugged } from './adminUi'
 import { chime, unlockAudio } from '../lib/chime'
 
 /*
@@ -283,7 +283,7 @@ export function PickupPage() {
     })
   }
 
-  if (!BACKEND) return <Shell><Empty title="Belum tersambung" text="VITE_BACKEND_URL belum diisi — lihat apps-script/README.md." /></Shell>
+  if (!BACKEND) return <Shell><SheetUnplugged page="Pickup" /></Shell>
   if (!pin) return <Shell><PinGate title="Pickup Pletok" wrong={wrong} onOk={setPin} /></Shell>
 
   return (

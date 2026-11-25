@@ -74,6 +74,8 @@ export function setForcedPhase(p: Phase | null) {
 }
 
 export const getForcedPhase = () => forced
+/** the phase right now, outside React (main.tsx picks what to preload with it) */
+export const phaseNow = (): Phase => forced ?? phaseAt(Date.now() + offset)
 
 /** Jump the site clock to `at` (epoch ms), or back to real time with null. Clears any forced phase so the clock decides. */
 export function setClock(at: number | null) {

@@ -32,6 +32,8 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url)
   // the Sheet, analytics, anything not ours: straight to the network, never cached
   if (url.origin !== self.location.origin || url.pathname.startsWith('/_vercel')) return
+  // the /gallery videos stream in pieces (range requests) — the browser handles those, not this cache
+  if (req.headers.has('range') || url.pathname.endsWith('.mp4')) return
 
   // pages: fresh if the network answers quickly, else the saved app (it routes itself)
   if (req.mode === 'navigate') {

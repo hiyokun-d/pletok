@@ -108,6 +108,18 @@ export function Lawang({ className = '', open = false }: { className?: string; o
 export type BatikKind = 'kawung' | 'parang' | 'truntum' | 'megamendung' | 'ceplok' | 'songket' | 'tumpal' | 'gigibalang'
 
 /** each pattern with where it comes from — the wall labels its tiles with these */
+/** traditional colourways: sogan browns for the Javanese court patterns, Cirebon's indigo, songket red & gold */
+export const BATIK_COLORS: Record<BatikKind, { bg: string; ink: string; edge: string }> = {
+  kawung: { bg: '#5a2e1a', ink: '#ecdcc5', edge: '#2b160c' },
+  parang: { bg: '#7a4a24', ink: '#f1d3a8', edge: '#2b160c' },
+  megamendung: { bg: '#1f3b63', ink: '#cfe0f2', edge: '#0f1f38' },
+  truntum: { bg: '#24283d', ink: '#f1e6c8', edge: '#12141f' },
+  songket: { bg: '#7a1f24', ink: '#e6b84a', edge: '#3d0d10' },
+  ceplok: { bg: '#3f5226', ink: '#efe3c2', edge: '#1f2a12' },
+  gigibalang: { bg: '#a8572a', ink: '#2b160c', edge: '#5a2e1a' },
+  tumpal: { bg: '#4a2414', ink: '#c98a3c', edge: '#1f0f07' },
+}
+
 export const BATIK: Array<{ kind: BatikKind; name: string; from: string }> = [
   { kind: 'gigibalang', name: 'Gigi Balang', from: 'Betawi' },
   { kind: 'kawung', name: 'Kawung', from: 'Yogyakarta' },

@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { BUNDLES, DRINKS, drinkById, type Bundle, type Drink, type DrinkId } from '../data/menu'
 import { BACKEND, onStats, pushMenu } from '../lib/backend'
+import { applyEvent, type EventSettings } from '../data/event'
 
 /**
  * Live menu state for the day, controlled from /hasil (admin, PIN) on any crew phone:
@@ -29,6 +30,8 @@ interface MenuState {
   attnShow?: number
   /** /config "Tema layar": the look of the menu screen, /cashier and /link */
   theme?: ThemeId
+  /** /config "Acara": name, day, hours, place — for opening again without recoding (data/event) */
+  event?: Partial<EventSettings>
   /** last change, to tell the newer copy apart when syncing */
   at?: number
 }
@@ -71,6 +74,7 @@ function load(): MenuState {
 
 function commit(next: MenuState, push = true) {
   state = push ? { ...next, at: Date.now() } : next
+  applyEvent(state.event)
   snap = derive(state)
   try {
     localStorage.setItem(KEY, JSON.stringify(state))
@@ -96,6 +100,7 @@ if (typeof window !== 'undefined')
   window.addEventListener('storage', (e) => {
     if (e.key !== KEY) return
     state = load()
+    applyEvent(state.event)
     snap = derive(state)
     listeners.forEach((l) => l())
   })
@@ -202,6 +207,11 @@ export function setTheme(theme: ThemeId) {
   commit({ ...state, theme })
 }
 
+/** /config "Acara": the next event's details (null = back to the defaults in data/event) */
+export function setEventSettings(event: Partial<EventSettings> | null) {
+  commit({ ...state, event: event ?? undefined })
+}
+
 /** A+G from a phone: the booth plays attention show `show` (-1 = random) `delayMs` from now (null = cancel) */
 export function scheduleAttention(delayMs: number | null, show = -1) {
   commit({ ...state, attnAt: delayMs === null ? undefined : Date.now() + delayMs, attnShow: delayMs === null ? undefined : show })
@@ -217,5 +227,5 @@ export function setMenuPrice(key: string, price: number | null) {
 
 /** restock: everything back on sale, bundles back to their recipe, booth open again */
 export function resetMenu() {
-  commit({ ...empty(), prices: state.prices })
+  commit({ ...empty(), prices: state.prices, event: state.event })
 }

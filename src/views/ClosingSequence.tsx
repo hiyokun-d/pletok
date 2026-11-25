@@ -71,7 +71,7 @@ function useStorm(w: number, h: number, desktop: boolean) {
  * Closing: leaves storm in and blanket the booth screen → the camera dives into the logo's leaf
  * until everything is brown → a cream logo regrows on brown with the thank-you.
  */
-export function ClosingSequence({ desktop }: { desktop: boolean }) {
+export function ClosingSequence({ desktop, onDone }: { desktop: boolean; /** set: hand over to the recap page a few seconds after the thank-you */ onDone?: () => void }) {
   const [scope, animate] = useAnimate()
   const { w, h } = useViewport()
   const [stage, setStage] = useState<Stage>('calm')
@@ -79,6 +79,8 @@ export function ClosingSequence({ desktop }: { desktop: boolean }) {
   const [run, setRun] = useState(0)
   const [burstKey, setBurstKey] = useState<number>()
   const storm = useStorm(w, h, desktop)
+  const doneRef = useRef(onDone)
+  doneRef.current = onDone
 
   useEffect(() => {
     let cancelled = false
@@ -110,6 +112,8 @@ export function ClosingSequence({ desktop }: { desktop: boolean }) {
       // 3. brown
       setStage('brown')
       setBurstKey(Date.now())
+      await wait(4500)
+      if (!cancelled) doneRef.current?.()
     }
     play()
     return () => {

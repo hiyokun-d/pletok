@@ -11,7 +11,7 @@ import { QrisCode } from '../components/QrisCode'
 import { LinkQr } from '../components/LinkQr'
 import { SITE_URL } from '../data/event'
 import { downloadLedger, ledger, markSent, markVoid, onLedger, reconcile, record, sync, type Reconciled } from '../lib/boothLedger'
-import { Card, CrewNav, Empty, PinGate, Shell, hhmm, useCrewPage } from './adminUi'
+import { Card, CrewNav, PinGate, Shell, hhmm, useCrewPage, SheetUnplugged } from './adminUi'
 
 /*
  * /cashier — the booth's till. Tap what they want, take the money, and the order lands in /pickup
@@ -206,7 +206,7 @@ export function CashierPage() {
     void loadHistory()
   }
 
-  if (!BACKEND) return <Shell><Empty title="Belum tersambung" text="VITE_BACKEND_URL belum diisi — lihat apps-script/README.md." /></Shell>
+  if (!BACKEND) return <Shell><SheetUnplugged page="Kasir" /></Shell>
   if (!pin) return <Shell><PinGate title="Kasir Pletok" wrong={wrong} onOk={setPin} /></Shell>
 
   // what the Sheet has + what's only on this phone so far: the till's numbers never stall on bad wifi

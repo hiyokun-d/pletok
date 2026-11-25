@@ -7,7 +7,7 @@ import { DRINKS } from '../data/menu'
 import { EVENT } from '../data/event'
 import { csvBlob, saveFile } from '../lib/download'
 import { spring } from '../lib/motion'
-import { Btn, Card, CrewNav, DEMO, Empty, PinGate, Shell, Tile, WAIT, hhmm, useCrewPage, wait } from './adminUi'
+import { Btn, Card, CrewNav, DEMO, PinGate, Shell, Tile, WAIT, hhmm, useCrewPage, wait, SheetUnplugged } from './adminUi'
 import { BAR, ColumnChart, HBar } from './HasilPage'
 
 /**
@@ -72,7 +72,7 @@ export function FinancialPage() {
   const sales = useMemo(() => salesOf(orders ?? [], booth ?? []), [orders, booth])
   const s = useMemo(() => summarize(sales, f), [sales, f])
 
-  if (!BACKEND && !DEMO) return <Shell><Empty title="Belum tersambung" text="VITE_BACKEND_URL belum diisi — lihat apps-script/README.md." /></Shell>
+  if (!BACKEND && !DEMO) return <Shell><SheetUnplugged page="Financial" /></Shell>
   if (!pin) return <Shell><PinGate title="Financial Pletok" wrong={state === 'pin'} onOk={setPin} /></Shell>
 
   return (

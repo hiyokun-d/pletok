@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Geometry, Mesh, Program, Renderer, Texture } from 'ogl'
-import { BATIK, Batik, Tumpal, type BatikKind } from './BetawiPattern'
+import { BATIK, BATIK_COLORS, Batik, Tumpal, type BatikKind } from './BetawiPattern'
 
 /*
  * Full-screen kain batik that behave like cloth, for the grand opening's last 20 s.
@@ -19,17 +19,7 @@ import { BATIK, Batik, Tumpal, type BatikKind } from './BetawiPattern'
  * Lite phones (and no WebGL) get the same kain as flat pictures sliding in, no simulation.
  */
 
-/** traditional colourways: sogan browns for the Javanese court patterns, Cirebon's indigo, songket red & gold */
-const PALETTE: Record<BatikKind, { bg: string; ink: string; edge: string }> = {
-  kawung: { bg: '#5a2e1a', ink: '#ecdcc5', edge: '#2b160c' },
-  parang: { bg: '#7a4a24', ink: '#f1d3a8', edge: '#2b160c' },
-  megamendung: { bg: '#1f3b63', ink: '#cfe0f2', edge: '#0f1f38' },
-  truntum: { bg: '#24283d', ink: '#f1e6c8', edge: '#12141f' },
-  songket: { bg: '#7a1f24', ink: '#e6b84a', edge: '#3d0d10' },
-  ceplok: { bg: '#3f5226', ink: '#efe3c2', edge: '#1f2a12' },
-  gigibalang: { bg: '#a8572a', ink: '#2b160c', edge: '#5a2e1a' },
-  tumpal: { bg: '#4a2414', ink: '#c98a3c', edge: '#1f0f07' },
-}
+const PALETTE = BATIK_COLORS
 
 const vertex = /* glsl */ `
 attribute vec3 position;

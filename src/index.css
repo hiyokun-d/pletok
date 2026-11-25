@@ -134,12 +134,22 @@ body {
     transform: translateY(14px);
   }
 }
+/* the recap's ticker: two copies of the row side by side, slid by one row's width — seamless */
+.pk-marquee {
+  animation: pk-marquee 26s linear infinite;
+}
+@keyframes pk-marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .pk-float,
   .pk-glow,
   .pk-wiggle,
   .pk-shine,
-  .pk-scroll-dot {
+  .pk-scroll-dot,
+  .pk-marquee {
     animation: none;
   }
 }

@@ -1,17 +1,17 @@
 import { motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
-import { Ban, Check, Palette, DoorClosed, Gift, Megaphone, X, Landmark, Loader2, PackageCheck, RotateCcw, ShieldCheck, ShoppingBag, Trash2, UtensilsCrossed } from 'lucide-react'
-import { EVENT } from '../data/event'
+import { Ban, CalendarDays, Check, Palette, DoorClosed, Gift, Megaphone, X, Landmark, Loader2, PackageCheck, RotateCcw, ShieldCheck, ShoppingBag, Trash2, UtensilsCrossed } from 'lucide-react'
+import { EVENT, EVENT_DEFAULTS, eventSettings, type EventSettings } from '../data/event'
 import { BUNDLES, DRINKS, type DrinkId } from '../data/menu'
 import { DEFAULT_CUTOFF, DEFAULT_PREORDER, PREORDER_ITEMS } from '../data/preorder'
 import { BACKEND, crewPin, savePreorderConfig, setFeedbackModeRemote, wipeData, type PreorderConfig, type Promo, type WipeTarget } from '../lib/backend'
 import { usePreorder } from '../hooks/usePreorder'
 import { SHOWS } from '../components/AttentionShow'
-import { resetMenu, scheduleAttention, setTheme, type ThemeId, setBundleForced, setBundleItems, setClosedEarly, setDrinkSold, setMenuPrice, useMenu, useMenuSync } from '../hooks/useMenu'
+import { resetMenu, scheduleAttention, setEventSettings, setTheme, type ThemeId, setBundleForced, setBundleItems, setClosedEarly, setDrinkSold, setMenuPrice, useMenu, useMenuSync } from '../hooks/useMenu'
 import { useEventPhase } from '../hooks/useEventPhase'
 import { useFeedbackOpen, type FeedbackMode } from '../hooks/useFeedbackOpen'
 import { spring } from '../lib/motion'
-import { Card, CrewNav, DEMO, Empty, PinGate, Shell, Switch, WAIT, dayTime, hhmm, sameJson, useCrewPage, wait } from './adminUi'
+import { Card, CrewNav, DEMO, PinGate, SheetUnplugged, Shell, Switch, WAIT, dayTime, hhmm, sameJson, useCrewPage, wait } from './adminUi'
 import { SignalBars } from '../components/SignalBars'
 
 /**
@@ -25,7 +25,16 @@ export function ConfigPage() {
   const [demoPreorder, setDemoPreorder] = useState<PreorderConfig>(DEFAULT_PREORDER)
   useCrewPage('Config')
 
-  if (!BACKEND && !DEMO) return <Shell><Empty title="Belum tersambung" text="VITE_BACKEND_URL belum diisi — lihat apps-script/README.md." /></Shell>
+  // Sheet unplugged: the event + theme still work, saved on this device only (no PIN to check against)
+  if (!BACKEND && !DEMO)
+    return (
+      <Shell>
+        <SheetUnplugged page="Config">
+          <EventAdmin local />
+          <ThemePicker />
+        </SheetUnplugged>
+      </Shell>
+    )
   if (!pin) return <Shell><PinGate title="Config Pletok" wrong={false} onOk={setPin} /></Shell>
 
   return (
@@ -38,6 +47,7 @@ export function ConfigPage() {
       </header>
 
       <MenuAdmin />
+      <EventAdmin />
       <ThemePicker />
       <AttentionRemote />
       <AdminPanel demo={DEMO} save={(m) => (DEMO ? wait(1200).then(() => true) : setFeedbackModeRemote(pin, m))} />
@@ -54,6 +64,83 @@ export function ConfigPage() {
       />
       <DataReset wipe={(what) => (DEMO ? wait(1500).then(() => Object.fromEntries(what.map((w) => [w, 3]))) : wipeData(pin, what))} />
     </Shell>
+  )
+}
+
+/* ------------------------------------------------------------------ the event */
+
+const FIELDS: Array<{ k: Exclude<keyof EventSettings, 'recap'>; label: string; type?: string }> = [
+  { k: 'name', label: 'Nama acara' },
+  { k: 'date', label: 'Tanggal', type: 'date' },
+  { k: 'open', label: 'Buka (WIB)', type: 'time' },
+  { k: 'close', label: 'Tutup (WIB)', type: 'time' },
+  { k: 'place', label: 'Tempat' },
+  { k: 'campus', label: 'Kampus / lokasi' },
+  { k: 'table', label: 'Meja' },
+]
+
+/**
+ * Opening again = fill this in, no recoding: the countdown, opening ceremony, last call and closing
+ * all follow the new date and hours on every screen. "Halaman recap" picks what shows after closing.
+ */
+function EventAdmin({ local = false }: { local?: boolean }) {
+  useMenu() // re-render when the Sheet hands over a newer copy
+  const saved = eventSettings()
+  const [draft, setDraft] = useState<EventSettings>(saved)
+  const [done, setDone] = useState('')
+  const changed = !sameJson(draft, saved)
+  const set = <K extends keyof EventSettings>(k: K, v: EventSettings[K]) => (setDraft((d) => ({ ...d, [k]: v })), setDone(''))
+  const save = (restock: boolean) => {
+    setEventSettings(draft)
+    if (restock) resetMenu()
+    setDone(restock ? 'Tersimpan · menu di-restock, siap buka lagi' : 'Tersimpan')
+  }
+  return (
+    <Card
+      className="mt-6"
+      title={
+        <span className="flex items-center gap-2">
+          <CalendarDays className="size-5 text-terracotta" /> Acara
+        </span>
+      }
+      meta={local ? 'Sheet dicabut — tersimpan di perangkat ini saja' : 'Buka lagi? Ganti di sini — semua layar ikut'}
+    >
+      <p className="-mt-2 mb-4 font-display text-brown-soft">
+        Sekarang: <b className="text-brown">{EVENT.name}</b> · {EVENT.dateLabel} · {EVENT.timeLabel} · {EVENT.table}
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {FIELDS.map((f) => (
+          <label key={f.k} className={f.k === 'name' ? 'sm:col-span-2' : ''}>
+            <span className="font-cond text-sm font-semibold italic text-brown-soft">{f.label}</span>
+            <input
+              type={f.type ?? 'text'}
+              value={draft[f.k]}
+              onChange={(e) => set(f.k, e.target.value)}
+              className="mt-1 block w-full rounded-2xl border-2 border-brown/10 bg-cream px-3 py-2.5 font-display text-base outline-none focus:border-terracotta"
+            />
+          </label>
+        ))}
+      </div>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-cream-deep/60 p-3">
+        <div>
+          <p className="font-display font-semibold">Halaman recap setelah tutup</p>
+          <p className="font-cond text-sm italic text-brown-soft">Angka, tim, feedback & galeri BINUS Festival · mati = ucapan terima kasih biasa</p>
+        </div>
+        <Switch on={draft.recap} pending={false} onClick={() => set('recap', !draft.recap)} label="Halaman recap" />
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <button disabled={!changed} onClick={() => save(false)} className="rounded-full bg-brown px-5 py-2.5 font-display font-semibold text-cream disabled:opacity-40">
+          Simpan
+        </button>
+        <button disabled={!changed} onClick={() => save(true)} className="rounded-full border-2 border-brown/15 px-5 py-2.5 font-display font-semibold disabled:opacity-40">
+          Simpan + restock menu
+        </button>
+        <button onClick={() => (setDraft(EVENT_DEFAULTS), setDone(''))} className="px-3 py-2.5 font-cond text-sm font-semibold italic text-brown-soft hover:text-brown">
+          <RotateCcw className="mr-1 inline size-3.5" /> isi ulang default
+        </button>
+        {done && <span className="font-cond text-sm italic text-leaf">{done}</span>}
+      </div>
+    </Card>
   )
 }
 

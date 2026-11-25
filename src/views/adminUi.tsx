@@ -102,6 +102,30 @@ export function Empty({ title, text }: { title: string; text: string }) {
   )
 }
 
+/**
+ * The Google Sheet is optional: with VITE_BACKEND_URL empty (unplugged after the event) the public
+ * pages carry on — recap, gallery, menu. Crew pages that need it show this instead of breaking,
+ * with what to do to plug it back in. Fits a phone and the booth laptop.
+ */
+export function SheetUnplugged({ page, children }: { page: string; children?: ReactNode }) {
+  return (
+    <div className="mx-auto mt-6 max-w-2xl">
+      <section className="rounded-3xl bg-[#e8b53a] p-6 text-brown shadow-[0_18px_40px_-24px_rgb(90_46_26/0.6)] sm:p-8">
+        <p className="font-cond text-sm font-semibold uppercase italic tracking-[0.25em]">{page} · butuh Google Sheet</p>
+        <h1 className="mt-1 font-display text-3xl font-bold leading-tight sm:text-4xl">Google Sheet lagi dicabut</h1>
+        <p className="mt-2 font-display text-lg leading-snug">Halaman publik tetap jalan (recap, galeri, menu). Halaman crew ini butuh Sheet buat simpan data — sambungkan lagi dulu:</p>
+        <ol className="mt-4 flex list-decimal flex-col gap-2 pl-5 font-display leading-snug">
+          <li>Buka Apps Script proyek Pletok → <b>Deploy → Manage deployments</b>, pastikan Web app aktif (atau <b>New version</b>).</li>
+          <li>Salin URL Web app ke <b>VITE_BACKEND_URL</b> — di Vercel: Settings → Environment Variables; di laptop: <code className="rounded bg-brown/10 px-1">.env.local</code>.</li>
+          <li><b>Redeploy</b> di Vercel (atau restart <code className="rounded bg-brown/10 px-1">bun dev</code>), lalu buka halaman ini lagi.</li>
+        </ol>
+        <p className="mt-4 font-cond text-base italic text-brown/75">Langkah lengkap: apps-script/README.md</p>
+      </section>
+      {children}
+    </div>
+  )
+}
+
 export function PinGate({ wrong, onOk, title }: { wrong: boolean; onOk: (pin: string) => void; title: string }) {
   const [pin, setPin] = useState('')
   const [bad, setBad] = useState(wrong)
